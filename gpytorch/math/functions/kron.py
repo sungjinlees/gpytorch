@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Variable
-from .lazy_function import LazyFunction
+from gpytorch.lazy import LazyFunction
 
 
 class Kron(LazyFunction):

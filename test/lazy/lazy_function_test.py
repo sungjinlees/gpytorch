@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Variable, Function
-from gpytorch.math.functions import LazyFunction
+from gpytorch.lazy import LazyFunction
 
 class TestFunction(LazyFunction):
     def forward(self, input):
