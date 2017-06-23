@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Function, Variable
-from gpytorch.math.functions import Kron
+from gpytorch.lazy import Kron, KronVariable
 
 a = torch.Tensor([
     [1, 2, 3],
@@ -24,7 +24,10 @@ def test_forward():
         [120,  150,  180],
         [160,  200,  240],
     ])
-    res = Kron()(Variable(a), Variable(b)).evaluate().data
+    output = Kron()(Variable(a), Variable(b))
+    assert(isinstance(output, KronVariable))
+
+    res = output.evaluate().data
     assert(torch.norm(res - actual) < 1e-4)
 
 

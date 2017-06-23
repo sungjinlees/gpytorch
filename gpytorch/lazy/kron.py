@@ -1,9 +1,16 @@
 import torch
 from torch.autograd import Variable
-from gpytorch.lazy import LazyFunction
+from gpytorch.lazy import LazyFunction, LazyVariable
+
+
+class KronVariable(LazyVariable):
+    pass
 
 
 class Kron(LazyFunction):
+    variable_class = KronVariable
+
+
     def forward(self, mat_1, mat_2):
         self.save_for_backward(mat_1, mat_2)
 
