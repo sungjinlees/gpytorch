@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Function
+from .lazy_variable import LazyVariable
 
 class LazyFunction(Function):
     '''
@@ -7,6 +8,8 @@ class LazyFunction(Function):
     Useful when variable data can be represented by a more efficient representation.
     (e.g. Kronecker, Toeplitz, etc.)
     '''
+    variable_class = LazyVariable
+
 
     def save_for_backward(self, *args):
         return super(LazyFunction, self).save_for_backward(*args)
@@ -30,7 +33,10 @@ class LazyFunction(Function):
 
         # Store the inputs and function class for later
         res.inputs = inputs
-        res.lazy_type = self.__class__
+
+        # Change class of result
+        cls = res.__class__
+        res.__class__ = cls.__class__(self.variable_class.__name__, (self.variable_class,), {})
 
         # Provide a method for evaluation
         def evaluate(self):
