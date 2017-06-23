@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Variable, Function
-from gpytorch.lazy import LazyFunction
+from gpytorch.lazy import LazyFunction, LazyVariable
 
 class TestFunction(LazyFunction):
     def forward(self, input):
@@ -27,6 +27,18 @@ def test_lazy_evaluation_occurs_on_evaluate():
     res = func(a_var)
     res.evaluate()
     assert(torch.norm(res.data - torch.ones(3, 2) * 4) < 1e-5)
+
+
+def test_lazy_evaluation_only_occurs_once():
+    func = TestFunction()
+    a_var = Variable(torch.ones(3, 2) * 2)
+    res = func(a_var)
+    res.evaluate()
+    assert(torch.norm(res.data - torch.ones(3, 2) * 4) < 1e-5)
+    assert(isinstance(res, Variable))
+    assert(not isinstance(res, LazyVariable))
+    assert(not hasattr(res, 'evaluate'))
+
 
 
 def test_lazy_evaluation_occurs_on_next_call():

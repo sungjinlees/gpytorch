@@ -36,6 +36,7 @@ class LazyFunction(Function):
 
         # Change class of result
         cls = res.__class__
+        res._original_class = cls
         res.__class__ = cls.__class__(self.variable_class.__name__, (self.variable_class,), {})
 
         # Provide a method for evaluation
@@ -43,6 +44,10 @@ class LazyFunction(Function):
             inputs = [input.data for input in self.inputs]
             res = orig_forward(*inputs)
             self.data = res
+            
+            # After evaluation, variable becomes a normal variable again
+            self.__class__ = self._original_class
+            del self.evaluate
             return self
 
         res.evaluate = evaluate.__get__(res, res.__class__)
