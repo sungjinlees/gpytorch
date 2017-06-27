@@ -39,8 +39,6 @@ class _ClassList(tuple):
 
 # Registration mechanism for efficient function calculations
 def register_lazy_function(cls, input_classes, function_class):
-    if not issubclass(function_class, LazyFunction):
-        raise RuntimeError('%s must be a LazyFunction subclass' % function_class.__name__)
     if not hasattr(cls, '_lazy_functions'):
         cls._lazy_functions = {}
     cls._lazy_functions[_ClassList(input_classes)] = function_class
