@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Function, Variable
-from gpytorch.lazy import Kron, KronVariable, register_lazy_function
+from gpytorch.lazy import Kron, KronVariable
 
 
 class AddDiag(Function):
@@ -31,4 +31,4 @@ class KronAddDiag(Kron):
         return Kron()(mat_a, mat_b, diag + new_diag_term)
 
 
-register_lazy_function(AddDiag, (KronVariable, Variable), KronAddDiag)
+AddDiag.register_lazy_function((KronVariable, Variable), KronAddDiag)

@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Function, Variable
 from gpytorch.utils import pd_catcher
 from gpytorch.utils.kron import kron_forward, kron_backward
-from gpytorch.lazy import Kron, KronVariable, LazyVariable, register_lazy_function
+from gpytorch.lazy import Kron, KronVariable, LazyVariable
 
 # Returns input_1^{-1} input_2
 class Invmm(Function):
@@ -130,4 +130,4 @@ class KronInvmm(Function):
         return res
 
 
-register_lazy_function(Invmm, (KronVariable, Variable), KronInvmm)
+Invmm.register_lazy_function((KronVariable, Variable), KronInvmm)
