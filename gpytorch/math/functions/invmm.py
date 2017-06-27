@@ -78,15 +78,17 @@ class KronInvmm(Function):
         eval_with_noise = torch.ger(mat_a_eval, mat_b_eval).view(-1).add_(diag_val)
 
         # Result
-        inv = (evec / eval_with_noise.unsqueeze(0).expand(m * p, m * p)).mm(evec.t())
-        res = inv.mm(other)
-        self.inv = inv
+        evec_eval_inv_prod = evec / eval_with_noise.unsqueeze(0).expand(m * p, m * p)
+        res = evec_eval_inv_prod.mm(evec.t().mm(other))
+        self.evec = evec
+        self.evec_eval_inv_prod = evec_eval_inv_prod
         self.save_for_backward(res)
         return res
 
 
     def backward(self, grad_output):
-        inv = self.inv
+        evec = self.evec
+        evec_eval_inv_prod = self.evec_eval_inv_prod
         res, = self.saved_tensors
 
         mat_a_grad = None
@@ -94,15 +96,19 @@ class KronInvmm(Function):
         diag_grad = None
         other_grad = None
 
-        mat_a_grad, mat_b_grad, diag_grad = kron_backward(
-                self.mat_a,
-                self.mat_b,
-                inv.mm(grad_output).mm(res.t()).mul_(-1),
-                self.needs_input_grad[:3]
-        )
+        if any(self.needs_input_grad[:3]):
+            kron_grad = torch.mm(grad_output, res.t())
+            kron_grad = torch.mm(evec_eval_inv_prod, evec.t().mm(kron_grad))
+            kron_grad.mul_(-1)
+            mat_a_grad, mat_b_grad, diag_grad = kron_backward(
+                    self.mat_a,
+                    self.mat_b,
+                    kron_grad,
+                    self.needs_input_grad[:3]
+            )
         
         if self.needs_input_grad[3]:
-            other_grad = inv.mm(grad_output)
+            other_grad = torch.mm(evec_eval_inv_prod, evec.t().mm(grad_output))
 
         return mat_a_grad, mat_b_grad, diag_grad, other_grad
 
