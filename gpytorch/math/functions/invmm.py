@@ -1,6 +1,8 @@
 import torch
 from torch.autograd import Function, Variable
 from gpytorch.utils import pd_catcher
+from gpytorch.utils.kron import kron_forward, kron_backward
+from gpytorch.lazy import Kron, KronVariable, LazyVariable, register_lazy_function
 
 # Returns input_1^{-1} input_2
 class Invmm(Function):
@@ -29,6 +31,10 @@ class Invmm(Function):
 
 
     def __call__(self, input_1_var, input_2_var):
+        if isinstance(input_1_var, LazyVariable):
+            return super(Invmm, self).__call__(input_1_var, input_2_var)
+
+        # If there is no structure to exploit, do a Cholesky decomposition
         if not hasattr(input_1_var, 'chol_data'):
             def add_jitter():
                 print('Matrix not positive definite. Adding jitter:')
@@ -52,3 +58,76 @@ class Invmm(Function):
         # Revert back to original data
         input_1_var.data = orig_data
         return res
+
+
+class KronInvmm(Function):
+    def forward(self, mat_a_eig_data, mat_b_eig_data, diag, other):
+        mat_a_evec = mat_a_eig_data[:, :-1]
+        mat_b_evec = mat_b_eig_data[:, :-1]
+        mat_a_eval = mat_a_eig_data[:, -1]
+        mat_b_eval = mat_b_eig_data[:, -1]
+        diag_val = diag.squeeze()[0]
+
+        m = mat_a_evec.size(0)
+        p = mat_b_evec.size(0)
+
+        # Caculate evec matrix
+        evec = kron_forward(mat_a_evec, mat_b_evec)
+
+        # Eval with noise
+        eval_with_noise = torch.ger(mat_a_eval, mat_b_eval).view(-1).add_(diag_val)
+
+        # Result
+        inv = (evec / eval_with_noise.unsqueeze(0).expand(m * p, m * p)).mm(evec.t())
+        res = inv.mm(other)
+        self.inv = inv
+        self.save_for_backward(res)
+        return res
+
+
+    def backward(self, grad_output):
+        inv = self.inv
+        res, = self.saved_tensors
+
+        mat_a_grad = None
+        mat_b_grad = None
+        diag_grad = None
+        other_grad = None
+
+        mat_a_grad, mat_b_grad, diag_grad = kron_backward(
+                self.mat_a,
+                self.mat_b,
+                inv.mm(grad_output).mm(res.t()).mul_(-1),
+                self.needs_input_grad[:3]
+        )
+        
+        if self.needs_input_grad[3]:
+            other_grad = inv.mm(grad_output)
+
+        return mat_a_grad, mat_b_grad, diag_grad, other_grad
+
+
+
+    def __call__(self, mat_a_var, mat_b_var, diag_var, other_var):
+        if not hasattr(mat_a_var, 'eig_data'):
+            evals, evec = mat_a_var.data.eig(eigenvectors=True)
+            mat_a_var.eig_data = torch.cat([evec, evals[:, 0]], 1)
+        if not hasattr(mat_b_var, 'eig_data'):
+            evals, evec = mat_b_var.data.eig(eigenvectors=True)
+            mat_b_var.eig_data = torch.cat([evec, evals[:, 0]], 1)
+
+        # Switch the variable data with eig data, for computation
+        # Save original data in function
+        self.mat_a = mat_a_var.data
+        self.mat_b = mat_b_var.data
+        mat_a_var.data = mat_a_var.eig_data
+        mat_b_var.data = mat_b_var.eig_data
+        res = super(KronInvmm, self).__call__(mat_a_var, mat_b_var, diag_var, other_var)
+
+        # Revert back to original data
+        mat_a_var.data = self.mat_a
+        mat_b_var.data = self.mat_b
+        return res
+
+
+register_lazy_function(Invmm, (KronVariable, Variable), KronInvmm)
