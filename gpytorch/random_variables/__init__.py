@@ -57,4 +57,4 @@ class GaussianRandomVariable(RandomVariable):
 
 
     def var(self):
-        return self.covar().diag()
+        return self.covar().diag().view(*self._mean.size())
