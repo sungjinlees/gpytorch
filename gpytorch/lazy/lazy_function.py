@@ -31,13 +31,13 @@ class LazyFunction(Function):
         res = super(LazyFunction, self).__call__(*inputs, **kwargs)
         self.forward = orig_forward
 
-        # Store the inputs and function class for later
-        res.inputs = inputs
-
         # Change class of result
         cls = res.__class__
         res._original_class = cls
         res.__class__ = cls.__class__(self.variable_class.__name__, (self.variable_class,), {})
+
+        # Store the inputs and function class for later
+        res.inputs = inputs
 
         # Provide a method for evaluation
         def evaluate(self):

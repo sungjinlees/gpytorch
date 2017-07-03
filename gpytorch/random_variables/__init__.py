@@ -1,4 +1,6 @@
 import torch
+from gpytorch.lazy import LazyVariable
+from gpytorch.math.functions import CovarIndex
 
 
 class RandomVariable(object):
@@ -32,6 +34,13 @@ class RandomVariable(object):
         return mean.sub(std2), mean.add(std2)
 
 
+    def evaluate(self):
+        for var in self.representation():
+            if isinstance(var, LazyVariable):
+                var.evaluate()
+        return self
+
+
 class GaussianRandomVariable(RandomVariable):
     def __init__(self, mean, var):
         self._mean = mean
@@ -57,4 +66,14 @@ class GaussianRandomVariable(RandomVariable):
 
 
     def var(self):
+        print(self.covar().size())
         return self.covar().diag().view(*self._mean.size())
+
+
+    def __getitem__(self, idx):
+        if not hasattr(idx, '__iter__'):
+            idx = idx,
+
+        mean = self._mean[idx]
+        covar = CovarIndex(self._mean.size(), idx)(self._var)
+        return self.__class__(mean, covar)

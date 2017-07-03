@@ -1,6 +1,3 @@
-from distribution import Distribution
-from observation_model import ObservationModel
-
 import torch
 from torch.autograd import Variable
 from .lazy import LazyVariable, LazyFunction
@@ -58,7 +55,8 @@ class _ClassList(tuple):
 
 # Registration mechanism for efficient function calculations
 def register_lazy_function(cls, input_classes, function_class):
-    cls.lazy_functions[_ClassList(input_classes)] = function_class
+    if function_class.__name__ not in [subcls.__name__ for subcls in cls.lazy_functions.values()]:
+        cls.lazy_functions[_ClassList(input_classes)] = function_class
 
 
 # New method to get function's lazy versions
@@ -82,7 +80,6 @@ def new_call(ctx, *inputs, **kwargs):
 
     # The function we will call, and the classes that our function is intended for
     needed_input_classes = [Variable] * len(inputs)
-    function = ctx
     call = orig_call.__get__(ctx, ctx.__class__)
 
     # Special action if we have any LazyVariables
@@ -94,8 +91,9 @@ def new_call(ctx, *inputs, **kwargs):
                 if actual_input_classes.matches(input_classes)])
         if len(function_matches):
             needed_input_classes, function_class = function_matches[0]
-            function = function_class()
-            call = function.__call__
+            cls = ctx.__class__
+            ctx.__class__ = cls.__class__(function_class.__name__, (function_class,), {})
+            call = ctx.__call__
 
         # Evaluate any lazy variables that we cannot exploit the structure of
         for input, needed_input_class in zip(inputs, needed_input_classes):
@@ -115,3 +113,9 @@ def new_call(ctx, *inputs, **kwargs):
 torch.autograd.Function.lazy_functions = lazy_functions
 torch.autograd.Function.register_lazy_function = register_lazy_function
 torch.autograd.Function.__call__ = new_call
+
+
+
+from distribution import Distribution
+from observation_model import ObservationModel
+

@@ -5,7 +5,11 @@ from gpytorch.utils.kron import kron_forward, kron_backward
 
 
 class KronVariable(LazyVariable):
-    pass
+    def check_inputs(self, inputs):
+        if len(inputs) != 3:
+            raise RuntimeError('Kron variables require 3 inputs')
+        if not inputs[2].numel() == 1:
+            raise RuntimeError('The last variable must be a single term')
 
 
 class Kron(LazyFunction):

@@ -3,7 +3,7 @@ import logging
 from itertools import chain
 from gpytorch.utils import pd_catcher, LBFGS
 from torch.autograd import Variable
-from gpytorch.math.functions import AddDiag, Invmv, Invmm
+from gpytorch.math.functions import AddDiag, Invmv, Invmm, CovarIndex
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.kernels import Kernel
 from gpytorch.means import Mean
@@ -54,17 +54,16 @@ class _ExactGPPosterior(ObservationModel):
         gaussian_rv_output, log_noise = self.gp_observation_model.forward(*full_inputs, **params)
         full_mean, full_covar = gaussian_rv_output.representation()
 
-        # Get mean/covar components
-        test_mean = full_mean[n:]
-        test_test_covar = full_covar[n:, n:]
-
         # If there's data, use it
         if n:
             train_y_var = Variable(self.train_y)
+            test_mean = full_mean[n:]
             train_mean = full_mean[:n]
-            train_train_covar = AddDiag()(full_covar[:n, :n], log_noise.exp())
-            test_train_covar = full_covar[n:, :n]
-            train_test_covar = full_covar[:n, n:]
+            test_test_covar = CovarIndex(full_mean.size(), slice(n, None, None))(full_covar)
+            train_train_covar = CovarIndex(full_mean.size(), slice(None, n, None))(full_covar)
+            train_train_covar = AddDiag()(train_train_covar, log_noise.exp())
+            test_train_covar = CovarIndex(full_mean.size(), slice(n, None, None), slice(None, n, None))(full_covar)
+            train_test_covar = test_train_covar.t()
 
             # Update test mean
             alpha = Invmv()(train_train_covar, train_y_var - train_mean)
@@ -73,5 +72,9 @@ class _ExactGPPosterior(ObservationModel):
             # Update test-test covar
             test_test_covar_correction = torch.mm(test_train_covar, Invmm()(train_train_covar, train_test_covar))
             test_test_covar = test_test_covar.sub(test_test_covar_correction)
+
+        else:
+            test_mean = full_mean
+            test_test_covar = full_covar
 
         return GaussianRandomVariable(test_mean, test_test_covar), log_noise

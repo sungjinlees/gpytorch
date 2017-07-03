@@ -14,6 +14,7 @@ def kron_forward(mat_1, mat_2, diag_val=0):
 
 
 def kron_backward(mat_1, mat_2, grad_output, needs_input_grad):
+    diag_grad = None
     if needs_input_grad[2]:
         diag_grad = grad_output.new().resize_(1)
         diag_grad.fill_(grad_output.trace())
