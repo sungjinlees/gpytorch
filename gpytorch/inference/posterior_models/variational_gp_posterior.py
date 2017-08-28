@@ -4,6 +4,7 @@ from torch import nn
 from torch.autograd import Variable
 from gpytorch.random_variables import GaussianRandomVariable
 from .gp_posterior import _GPPosterior
+import pdb
 
 
 class _VariationalGPPosterior(_GPPosterior):

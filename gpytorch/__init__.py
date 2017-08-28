@@ -174,6 +174,12 @@ def mvn_kl_divergence(mean_1, chol_covar_1, mean_2, covar_2, num_samples=10):
     return res
 
 
+def preconditioner(covar, gp_model):
+    if isinstance(covar, LazyVariable):
+        return covar.preconditioner(gp_model)
+
+
+
 def normal_cdf(x):
     """
     Computes the element-wise standard normal CDF of an input tensor x.

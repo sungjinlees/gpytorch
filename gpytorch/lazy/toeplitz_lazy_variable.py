@@ -191,6 +191,9 @@ class ToeplitzLazyVariable(LazyVariable):
             added_diag = Variable(torch.zeros(1))
         return self.c, W_left, W_right, added_diag
 
+    def variational_representation(self):
+        return ToeplitzLazyVariable(self.c).representation()
+
     def exact_posterior_alpha(self, train_mean, train_y):
         train_residual = (train_y - train_mean).unsqueeze(1)
         alpha = self.invmm(train_residual)
@@ -205,10 +208,7 @@ class ToeplitzLazyVariable(LazyVariable):
         return test_mean.add(gpytorch.dsmm(W_test_left, alpha).squeeze())
 
     def trace_log_det_quad_form(self, mu_diffs, chol_covar_1, num_samples):
-        if self.J_left is None and self.J_right is None:
-            return super(ToeplitzLazyVariable, self).trace_log_det_quad_form(mu_diffs, chol_covar_1, num_samples)
-        else:
-            return ToeplitzLazyVariable(self.c).trace_log_det_quad_form(mu_diffs, chol_covar_1, num_samples)
+        return super(ToeplitzLazyVariable, self).trace_log_det_quad_form(mu_diffs, chol_covar_1, num_samples)
 
     def variational_posterior_mean(self, alpha):
         """

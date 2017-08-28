@@ -133,34 +133,21 @@ class LazyVariable(object):
         """
         raise NotImplementedError
 
-    def mvn_kl_divergence(self, mean_1, chol_covar_1, mean_2):
-        """
-        Computes the KL divergence between two multivariate Normal distributions. The first of these
-        distributions is specified by mean_1 and chol_covar_1, while the second distribution is specified
-        by mean_2 and this LazyVariable.
-
-        Args:
-            - mean_1 (vector n) - Mean vector of the first Gaussian distribution.
-            - chol_covar_1 (matrix n x n) - Cholesky factorization of the covariance matrix of the first Gaussian
-                                            distribution.
-            - mean_2 (vector n) - Mean vector of the second Gaussian distribution.
-        Returns:
-            - KL divergence between N(mean_1, chol_covar_1) and N(mean_2, self)
-        """
-        raise NotImplementedError
-
     def representation(self, *args):
         """
         Returns the variables that are used to define the LazyVariable
         """
         raise NotImplementedError
 
+    def variational_representation(self):
+        return self.representation()
+
     def trace_log_det_quad_form(self, mu_diffs, chol_covar_1, num_samples=10):
         if not hasattr(self, '_trace_log_det_quad_form_class'):
             tlqf_function_factory = function_factory.trace_logdet_quad_form_factory
             self._trace_log_det_quad_form_class = tlqf_function_factory(self._mm_closure_factory,
                                                                         self._derivative_quadratic_form_factory)
-        covar2_args = self.representation()
+        covar2_args = self.variational_representation()
         return self._trace_log_det_quad_form_class(num_samples)(mu_diffs, chol_covar_1, *covar2_args)
 
     def exact_posterior_alpha(self, train_mean, train_y):

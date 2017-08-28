@@ -2,7 +2,7 @@ from torch.autograd import Function
 from .lincg import LinearCG
 from .lanczos_quadrature import StochasticLQ
 import torch
-
+import pdb
 
 def _default_mm_closure_factor(x):
     return x
@@ -104,8 +104,9 @@ def trace_logdet_quad_form_factory(mm_closure_factory=_default_mm_closure_factor
                                       The result of this function should be a list consistent to *covar2_args.
     """
     class TraceLogDetQuadForm(Function):
-        def __init__(self, num_samples=10):
+        def __init__(self, num_samples=10, covar2_precondition_closure=None):
             self.num_samples = num_samples
+            self.covar2_precondition_closure = covar2_precondition_closure
 
         def forward(self, mu_diff, chol_covar1, *covar2_args):
             if isinstance(mm_closure_factory(*covar2_args), torch.Tensor):
@@ -115,7 +116,8 @@ def trace_logdet_quad_form_factory(mm_closure_factory=_default_mm_closure_factor
                         return mm_closure_factory(*covar2_args)(vector.unsqueeze(1)).squeeze()
 
             def quad_form_closure(z):
-                return z.dot(LinearCG().solve(covar2_mv_closure, chol_covar1.t().mv(chol_covar1.mv(z))))
+                lincg_instance = LinearCG(precondition_closure=self.covar2_precondition_closure)
+                return z.dot(lincg_instance.solve(covar2_mv_closure, chol_covar1.t().mv(chol_covar1.mv(z))))
 
             # log |K2|
             log_det_covar2, = StochasticLQ(num_random_probes=10).evaluate(covar2_mv_closure,
@@ -130,7 +132,13 @@ def trace_logdet_quad_form_factory(mm_closure_factory=_default_mm_closure_factor
             trace = trace / self.num_samples
 
             # Inverse quad form
-            mat_inv_y = LinearCG().solve(covar2_mv_closure, mu_diff)
+            lincg_instance = LinearCG(precondition_closure=self.covar2_precondition_closure)
+            mat_inv_y = lincg_instance.solve(covar2_mv_closure, mu_diff)
+            mat_inv_y2 = LinearCG().solve(covar2_mv_closure, mu_diff)
+
+            forward_est1 = covar2_mv_closure(mat_inv_y)
+            forward_est2 = covar2_mv_closure(mat_inv_y2)
+            print torch.norm(forward_est1 - mu_diff), torch.norm(forward_est2 - mu_diff)
             inv_quad_form = mat_inv_y.dot(mu_diff)
 
             res = log_det_covar2 + trace + inv_quad_form
@@ -163,7 +171,8 @@ def trace_logdet_quad_form_factory(mm_closure_factory=_default_mm_closure_factor
 
             if self.needs_input_grad[1]:
                 # Compute gradient with respect to the Cholesky factor L
-                grad_cholesky_factor = 2 * LinearCG().solve(mm_closure_factory(*covar2_args), chol_covar1)
+                lincg_instance = LinearCG(precondition_closure=self.covar2_precondition_closure)
+                grad_cholesky_factor = 2 * lincg_instance.solve(mm_closure_factory(*covar2_args), chol_covar1)
                 grad_cholesky_factor.mul_(grad_output_value)
 
             if self.needs_input_grad[2]:
@@ -176,7 +185,9 @@ def trace_logdet_quad_form_factory(mm_closure_factory=_default_mm_closure_factor
                     grad_covar2_args[i] = torch.zeros(covar2_args[i].size())
 
                 def deriv_quad_form_closure(z):
-                    I_minus_Tinv_M_z = z - LinearCG().solve(covar2_mv_closure, chol_covar1.t().mv(chol_covar1.mv(z)))
+                    lincg_instance = LinearCG(precondition_closure=self.covar2_precondition_closure)
+                    I_minus_Tinv_M_z = z - lincg_instance.solve(covar2_mv_closure,
+                                                                chol_covar1.t().mv(chol_covar1.mv(z)))
                     Tinv_z = LinearCG().solve(covar2_mv_closure, z)
                     return derivative_quadratic_form_factory(*covar2_args)(Tinv_z, I_minus_Tinv_M_z)
 
