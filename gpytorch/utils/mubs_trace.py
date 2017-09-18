@@ -17,3 +17,7 @@ def sample_mubs(size, num_probes):
 def mubs_trace(matmul_closure, size, num_probes):
     re, im = sample_mubs(size, num_probes)
     return size * ((re * matmul_closure(re)).sum() + (im * matmul_closure(im)).sum()) / num_probes
+
+def hutchinson_trace(matmul_closure, size, num_probes):
+    zz = torch.sign(torch.randn(size, num_probes))
+    return (zz * matmul_closure(zz)).sum() / num_probes
