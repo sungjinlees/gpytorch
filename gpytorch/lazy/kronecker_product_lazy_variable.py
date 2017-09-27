@@ -90,7 +90,7 @@ class KroneckerProductLazyVariable(LazyVariable):
             kronecker_product_diag = diag.expand_as(self.kronecker_product_size)
 
         return KroneckerProductLazyVariable(self.columns, self.J_lefts, self.C_lefts,
-                                            self.J_rights, self.C_rights, kronecker_product_diag)
+                                            self.J_rights, self.C_rights, self.added_diag + kronecker_product_diag)
 
     def add_jitter(self):
         jitter = self.columns.data.new(self.columns.size()).zero_()

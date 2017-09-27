@@ -93,7 +93,7 @@ class ToeplitzLazyVariable(LazyVariable):
             toeplitz_diag = diag.expand_as(self.c)
 
         return ToeplitzLazyVariable(self.c, self.J_left, self.C_left,
-                                    self.J_right, self.C_right, toeplitz_diag)
+                                    self.J_right, self.C_right, self.added_diag + toeplitz_diag)
 
     def add_jitter(self):
         jitter = self.c.data.new(self.c.size(-1)).zero_()
