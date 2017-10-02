@@ -54,10 +54,15 @@ class MulLazyVariable(LazyVariable):
     def _matmul_closure_factory(self, *args):
         n1, n2 = self.size()
         if n1 != n2:
-            temp_samples = self.num_samples
-            self.num_samples = self.lazy_vars[0].size()[0]
-            result = self._stoch_deter_matmul_closure_factory(*args)
-            self.num_samples = temp_samples
+            if not hasattr(self, '_M'):
+                self._M = self.evaluate().data
+            def explicit_closure(rhs):
+                return self._M.matmul(rhs)
+            return explicit_closure
+#            temp_samples = self.num_samples
+#            self.num_samples = self.lazy_vars[0].size()[0]
+#            result = self._stoch_deter_matmul_closure_factory(*args)
+#            self.num_samples = temp_samples
             return result
         elif self.matmul_mode == 'approximate':
             return self._approx_matmul_closure_factory(*args)
@@ -117,7 +122,7 @@ class MulLazyVariable(LazyVariable):
                 right_factor = (sample_matrix_1 * sample_matrix_2).transpose(1, 2).contiguous()
                 right_factor = right_factor.view(dim, n, num_samples * m)
 
-                res_mul = torch.ones(n, num_samples * m)
+                res_mul = rhs_mat.new(n, num_samples * m).fill_(1)
                 for i in range(dim):
                     res_mul *= sub_closures[i](right_factor[i])
 

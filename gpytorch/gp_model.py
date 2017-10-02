@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .random_variables import RandomVariable, GaussianRandomVariable
-from .lazy import LazyVariable
+from .lazy import LazyVariable, MulLazyVariable
 from .likelihoods import GaussianLikelihood
 
 
@@ -154,7 +154,6 @@ class GPModel(gpytorch.Module):
                 full_inputs = [torch.cat([train_x, input]) for train_x, input in zip(train_xs, args)]
                 full_output = super(GPModel, self).__call__(*full_inputs, **kwargs)
                 full_mean, full_covar = full_output.representation()
-
                 train_mean = full_mean[:n_train]
                 test_mean = full_mean[n_train:]
                 train_train_covar = gpytorch.add_diag(full_covar[:n_train, :n_train], self.likelihood.log_noise.exp())
@@ -172,8 +171,11 @@ class GPModel(gpytorch.Module):
                     alpha = Variable(self.alpha)
                 mean_strategy = gpytorch.posterior_strategy(test_train_covar)
                 test_mean = mean_strategy.exact_posterior_mean(test_mean, alpha)
-                covar_strategy = gpytorch.posterior_strategy(train_train_covar)
-                test_covar = covar_strategy.exact_posterior_covar(test_train_covar, train_test_covar, test_test_covar)
+                if isinstance(full_covar, MulLazyVariable):
+                    test_covar = Variable(torch.Tensor([1]))
+                else: 
+                    covar_strategy = gpytorch.posterior_strategy(train_train_covar)
+                    test_covar = covar_strategy.exact_posterior_covar(test_train_covar, train_test_covar, test_test_covar)
                 output = GaussianRandomVariable(test_mean, test_covar)
 
             # Approximate inference

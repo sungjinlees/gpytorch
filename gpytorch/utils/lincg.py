@@ -1,7 +1,7 @@
 import torch
 import gpytorch
 from torch.autograd import Variable
-
+import sys
 
 class LinearCG(object):
     """
@@ -17,6 +17,8 @@ class LinearCG(object):
     """
     def __init__(self, tolerance_resid=1e-6, precondition_closure=None):
         self.max_iter = int(gpytorch.functions.max_cg_iterations)
+        print self.max_iter
+        sys.stdout.flush()
         self.tolerance_resid = tolerance_resid
         self.precondition_closure = precondition_closure
 

@@ -13,7 +13,12 @@ class DefaultPosteriorStrategy(PosteriorStrategy):
         return res
 
     def exact_posterior_mean(self, test_mean, alpha):
-        if isinstance(self.var, LazyVariable):
+        from gpytorch.lazy import MulLazyVariable
+        if isinstance(self.var, MulLazyVariable):
+            result = self.var.cpu().matmul(alpha.cpu()) + test_mean.cpu()
+            print 'Got it!'
+            return result
+        elif isinstance(self.var, LazyVariable):
             return self.var.matmul(alpha) + test_mean
         return torch.addmv(test_mean, self.var, alpha)
 
