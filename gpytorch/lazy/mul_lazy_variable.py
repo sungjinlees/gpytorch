@@ -337,7 +337,13 @@ class MulLazyVariable(LazyVariable):
                 return MulLazyVariable(*res, matmul_mode=self.matmul_mode)
             return MulLazyVariable(*(list(self.lazy_vars) + [other]), matmul_mode=self.matmul_mode)
         else:
-            raise RuntimeError('other must be a LazyVariable, int or float.')
+            lazy_vars = list(self.lazy_vars[:-1])
+            lazy_vars.append(self.lazy_vars[-1] * other)
+            if self.added_diag is not None:
+                added_diag = self.added_diag * other
+            else:
+                added_diag = None
+            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode)
 
     def representation(self):
         res = list(var for lazy_var in self.lazy_vars for var in lazy_var.representation())
