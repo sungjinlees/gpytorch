@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from ..utils.trace import trace_components
 from gpytorch.utils import StochasticLQ
-
+import pdb
 
 class MulLazyVariable(LazyVariable):
     def __init__(self, *lazy_vars, **kwargs):
@@ -213,6 +213,13 @@ class MulLazyVariable(LazyVariable):
             Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
             Q = Q[0]
             T = T[0]
+            if T[-1, -1] > 1:
+                best_idx = T.diag()[3:].min(0)[1][0]
+                T = T[:best_idx + 1, :best_idx + 1]
+                Q = Q[:, :best_idx + 1]
+            if T[-1, -1] > 1:
+                pass
+#                pdb.set_trace()
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
 
