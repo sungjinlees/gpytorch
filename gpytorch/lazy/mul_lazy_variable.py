@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from ..utils.trace import trace_components
 from gpytorch.utils import StochasticLQ
 import pdb
+import sys
 
 class MulLazyVariable(LazyVariable):
     def __init__(self, *lazy_vars, **kwargs):
@@ -202,6 +203,19 @@ class MulLazyVariable(LazyVariable):
                 return res
         return closure
 
+    def binary_search_symeig(self, T):
+        left = 0
+        right = len(T)
+        while right - left > 1:
+            mid = (left + right) // 2
+            eigs = T[:mid, :mid].symeig()[0]
+            if torch.min(eigs) < -1e-4:
+                right = mid - 1
+            else:
+                left = mid
+
+        return left
+
     def _lanczos_quadrature_form(self, *args):
         if not hasattr(self, '_lanczos_quadrature'):
             n = self.size()[0]
@@ -213,13 +227,12 @@ class MulLazyVariable(LazyVariable):
             Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
             Q = Q[0]
             T = T[0]
-            if T[-1, -1] > 1:
-                best_idx = T.diag()[3:].min(0)[1][0]
-                T = T[:best_idx + 1, :best_idx + 1]
-                Q = Q[:, :best_idx + 1]
-            if T[-1, -1] > 1:
-                pass
-#                pdb.set_trace()
+            
+            T_cpu = T.cpu()
+            T_cpu = T_cpu + torch.diag(T_cpu.new(len(T_cpu)).fill_(2e-2))
+            best_idx = max(self.binary_search_symeig(T_cpu), 1)
+            T = T[:best_idx, :best_idx]
+            Q = Q[:, :best_idx]
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
 
