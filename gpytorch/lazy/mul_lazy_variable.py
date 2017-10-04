@@ -210,7 +210,6 @@ class MulLazyVariable(LazyVariable):
 
             def tensor_matmul_closure(rhs):
                 return self._matmul_closure_factory(*args)(rhs)
-
             Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
             Q = Q[0]
             T = T[0]
@@ -325,17 +324,17 @@ class MulLazyVariable(LazyVariable):
             lazy_vars = list(self.lazy_vars[:-1])
             lazy_vars.append(self.lazy_vars[-1] * other)
             added_diag = self.added_diag * other
-            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode)
+            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode, max_iter=self.max_iter)
         elif isinstance(other, MulLazyVariable):
             if self.added_diag is not None:
                 res = list((self, other))
                 return MulLazyVariable(*res)
-            return MulLazyVariable(*(list(self.lazy_vars) + list(other.lazy_vars)), matmul_mode=self.matmul_mode)
+            return MulLazyVariable(*(list(self.lazy_vars) + list(other.lazy_vars)), matmul_mode=self.matmul_mode, max_iter=self.max_iter)
         elif isinstance(other, LazyVariable):
             if self.added_diag is not None:
                 res = list((self, other))
                 return MulLazyVariable(*res, matmul_mode=self.matmul_mode)
-            return MulLazyVariable(*(list(self.lazy_vars) + [other]), matmul_mode=self.matmul_mode)
+            return MulLazyVariable(*(list(self.lazy_vars) + [other]), matmul_mode=self.matmul_mode, max_iter=self.max_iter)
         else:
             lazy_vars = list(self.lazy_vars[:-1])
             lazy_vars.append(self.lazy_vars[-1] * other)
@@ -343,7 +342,7 @@ class MulLazyVariable(LazyVariable):
                 added_diag = self.added_diag * other
             else:
                 added_diag = None
-            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode)
+            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode, max_iter=self.max_iter)
 
     def representation(self):
         res = list(var for lazy_var in self.lazy_vars for var in lazy_var.representation())
