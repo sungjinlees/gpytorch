@@ -7,6 +7,7 @@ from gpytorch.utils import StochasticLQ
 import pdb
 import sys
 
+
 class MulLazyVariable(LazyVariable):
     def __init__(self, *lazy_vars, **kwargs):
         '''
@@ -219,37 +220,62 @@ class MulLazyVariable(LazyVariable):
 
         return left
 
+    def inv_matmul(self, rhs):
+        """
+        Computes a linear solve (w.r.t self) with several right hand sides.
+
+        Args:
+            - rhs (tensor nxk) - Matrix or tensor
+
+        Returns:
+            - tensor - (self)^{-1} rhs
+        """
+        args = list(self.representation())
+
+        matmul_closure = self._matmul_closure_factory(args)
+
+        rhs_data = rhs.data
+        self._lq_vec = matmul_closure(rhs_data)
+
+        Q, T = self._lanczos_quadrature_form(args)
+
+        old_sol = super(MulLazyVariable, self).inv_matmul(rhs)
+        solution = Q.matmul(torch.gesv(Q.t().matmul(rhs_data), T))
+        pdb.set_trace()
+
+        return Variable(solution)
+
     def _lanczos_quadrature_form(self, *args):
         if not hasattr(self, '_lanczos_quadrature'):
             n = self.size()[0]
-            z = args[0].new(n, 1).normal_()
-            z = z / torch.norm(z, 2, 0)
+            if not hasattr(self, '_lq_vec'):
+                z = args[0].new(n, 1).normal_()
+                z = z / torch.norm(z, 2, 0)
+            else:
+                z = self._lq_vec
 
             def tensor_matmul_closure(rhs):
                 return self._matmul_closure_factory(*args)(rhs)
             Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
             Q = Q[0]
             T = T[0]
-            
+
             T_cpu = T.cpu()
             T_cpu = T_cpu + torch.diag(T_cpu.new(len(T_cpu)).fill_(2e-2))
             best_idx = max(self.binary_search_symeig(T_cpu), 1)
-                        
+
             T = T[:best_idx, :best_idx]
             Q = Q[:, :best_idx]
 
             actual = tensor_matmul_closure(z)
             approx = Q.matmul(T.matmul(Q.t().matmul(z)))
-            
+
             actual2 = tensor_matmul_closure(self._rhs_mat)
             approx2 = Q.matmul(T.matmul(Q.t().matmul(self._rhs_mat)))
-             
+
             print torch.norm(actual - approx)
             print torch.norm(actual2 - approx2)
-            
-            my_closure = lambda v: Q.matmul(T.matmul(Q.t().matmul(v))) 
-            pdb.set_trace()
-            
+
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
 
