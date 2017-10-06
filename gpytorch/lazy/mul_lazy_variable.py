@@ -175,6 +175,9 @@ class MulLazyVariable(LazyVariable):
                 if rhs_mat.ndimension() == 1:
                     rhs_mat = rhs_mat.unsqueeze(1)
                     if_vector = True
+                self._rhs_mat = rhs_mat
+                self.left_var._rhs_mat = rhs_mat
+                self.right_var._rhs_mat = rhs_mat
                 Q_1, T_1 = self.left_var._lanczos_quadrature_form(*args[:half_args_length])
                 Q_2, T_2 = self.right_var._lanczos_quadrature_form(*args[half_args_length:])
 
@@ -231,8 +234,22 @@ class MulLazyVariable(LazyVariable):
             T_cpu = T.cpu()
             T_cpu = T_cpu + torch.diag(T_cpu.new(len(T_cpu)).fill_(2e-2))
             best_idx = max(self.binary_search_symeig(T_cpu), 1)
+                        
             T = T[:best_idx, :best_idx]
             Q = Q[:, :best_idx]
+
+            actual = tensor_matmul_closure(z)
+            approx = Q.matmul(T.matmul(Q.t().matmul(z)))
+            
+            actual2 = tensor_matmul_closure(self._rhs_mat)
+            approx2 = Q.matmul(T.matmul(Q.t().matmul(self._rhs_mat)))
+             
+            print torch.norm(actual - approx)
+            print torch.norm(actual2 - approx2)
+            
+            my_closure = lambda v: Q.matmul(T.matmul(Q.t().matmul(v))) 
+            pdb.set_trace()
+            
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
 

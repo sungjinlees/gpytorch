@@ -90,7 +90,7 @@ class LinearCG(object):
                 residuals = residuals - alphas.expand_as(AP).mul(AP)
 
                 r_sq_news = residuals.pow(2).sum(0)
-
+                print r_sq_news.sqrt().squeeze()
                 if all(r_sq_news.sqrt().squeeze() < self.tolerance_resid):
                     break
 
