@@ -3,7 +3,7 @@ from ..posterior import DefaultPosteriorStrategy
 import torch
 from torch.autograd import Variable
 from ..utils.trace import trace_components
-from gpytorch.utils import StochasticLQ
+from gpytorch.utils import StochasticLQ, LinearCG
 import pdb
 import sys
 
@@ -232,18 +232,14 @@ class MulLazyVariable(LazyVariable):
         """
         args = list(self.representation())
 
-        matmul_closure = self._matmul_closure_factory(args)
+        matmul_closure = self._matmul_closure_factory(*(arg.data for arg in args))
 
         rhs_data = rhs.data
-        self._lq_vec = matmul_closure(rhs_data)
-
-        Q, T = self._lanczos_quadrature_form(args)
-
-        old_sol = super(MulLazyVariable, self).inv_matmul(rhs)
-        solution = Q.matmul(torch.gesv(Q.t().matmul(rhs_data), T))
-        pdb.set_trace()
-
-        return Variable(solution)
+        if rhs_data.ndimension() == 1:
+            rhs_data = rhs_data.unsqueeze(1)
+        
+        sol2 = LinearCG().solve(matmul_closure, rhs_data).squeeze()
+        return Variable(sol2)
 
     def _lanczos_quadrature_form(self, *args):
         if not hasattr(self, '_lanczos_quadrature'):
@@ -266,15 +262,6 @@ class MulLazyVariable(LazyVariable):
 
             T = T[:best_idx, :best_idx]
             Q = Q[:, :best_idx]
-
-            actual = tensor_matmul_closure(z)
-            approx = Q.matmul(T.matmul(Q.t().matmul(z)))
-
-            actual2 = tensor_matmul_closure(self._rhs_mat)
-            approx2 = Q.matmul(T.matmul(Q.t().matmul(self._rhs_mat)))
-
-            print torch.norm(actual - approx)
-            print torch.norm(actual2 - approx2)
 
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
