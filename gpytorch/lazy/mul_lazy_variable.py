@@ -231,13 +231,13 @@ class MulLazyVariable(LazyVariable):
             - tensor - (self)^{-1} rhs
         """
         args = list(self.representation())
-
+        self._lq_vec = rhs.data
         matmul_closure = self._matmul_closure_factory(*(arg.data for arg in args))
 
         rhs_data = rhs.data
         if rhs_data.ndimension() == 1:
             rhs_data = rhs_data.unsqueeze(1)
-        
+         
         sol2 = LinearCG().solve(matmul_closure, rhs_data).squeeze()
         return Variable(sol2)
 
@@ -255,14 +255,15 @@ class MulLazyVariable(LazyVariable):
             Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
             Q = Q[0]
             T = T[0]
-
+            print 'BEFORE CLIP', T[-1, -1], len(T)
             T_cpu = T.cpu()
-            T_cpu = T_cpu + torch.diag(T_cpu.new(len(T_cpu)).fill_(2e-2))
+            T_cpu = T_cpu + torch.diag(T_cpu.new(len(T_cpu)).fill_(1))
             best_idx = max(self.binary_search_symeig(T_cpu), 1)
 
             T = T[:best_idx, :best_idx]
+#            T = T  + torch.diag(T.new(len(T)).fill_(2e-2))
+            print 'AFTER CLIP', T[-1, -1], len(T)
             Q = Q[:, :best_idx]
-
             self._lanczos_quadrature = Q, T
         return self._lanczos_quadrature
 

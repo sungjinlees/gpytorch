@@ -1,6 +1,6 @@
 import torch
 import math
-
+import pdb
 
 class StochasticLQ(object):
     """
@@ -25,6 +25,36 @@ class StochasticLQ(object):
         self.cls = cls or torch.Tensor
         self.max_iter = max_iter
         self.num_random_probes = num_random_probes
+    
+    def lanczos_stable(self, matmul_closure, start_vector):
+        dim = len(start_vector)
+        num_iters = min(self.max_iter, dim)
+        Q = self.cls(dim, num_iters).zero_()
+        alpha = self.cls(num_iters).zero_()
+        beta = self.cls(num_iters).zero_()
+
+        Q[:, 0] = start_vector/torch.norm(start_vector, 2)
+        for j in range(1, num_iters):
+            Q[:, j] = matmul_closure(Q[:,j - 1]).squeeze()
+            alpha[j - 1] = Q[:, j - 1].matmul(Q[:, j])
+            Q[:, j] = Q[:, j] - alpha[j - 1]*Q[:, j - 1]
+            if j > 1:
+                Q[:, j] = Q[:, j] - beta[j - 1]*Q[:, j - 1]
+            beta[j] = torch.norm(Q[:, j], 2)
+            Q[:, j] = Q[:, j] / beta[j]
+            
+            if torch.norm(Q[:, j]) < 0*math.sqrt(alpha[j]**2 + beta[j - 1]**2):
+                print 'REORTH'
+                s = Q[:, :j].t().matmul(Q[:, j])
+                r = r - Q[:, :j].matmul(s)
+                alpha[j - 1] = alpha[j - 1] + s[j - 1]
+                beta[j - 1] = beta[j - 1] + s[j - 2]
+
+        beta = beta[1:j + 1]
+        alpha = alpha[:j + 1]
+        Q = Q[:, :j + 1]
+        T = torch.diag(alpha) + torch.diag(beta, -1) + torch.diag(beta, 1)
+        return Q, T
 
     def lanczos_batch(self, matmul_closure, rhs_vectors):
         dim, num_vectors = rhs_vectors.size()
@@ -52,18 +82,13 @@ class StochasticLQ(object):
 
         else:
             for k in range(1, num_iters):
-                U, rhs_vectors, alpha_k, beta_k = self._lanczos_step_batch(U, rhs_vectors, matmul_closure, Q[:, :, :k])
+                U, rhs_vectors, alpha_k, beta_k = self._lanczos_step_batch(U, rhs_vectors, matmul_closure, Q[:, :, :k], beta[:, k - 1])
 
-<<<<<<< HEAD
-            if all(torch.abs(beta[:, k]) < 1e-5) or all(torch.abs(alpha[:, k]) < 1e-5):
-                break
-=======
                 alpha[:, k] = alpha_k
                 beta[:, k] = beta_k
                 Q[:, :, k] = U.t()
->>>>>>> c2f63e6... Lanczos quadrature now uses all probes
 
-                if all(torch.abs(beta[:, k]) < 1e-4) or all(torch.abs(alpha[:, k]) < 1e-4):
+                if all(torch.abs(beta[:, k]) < 1e-6) or all(torch.abs(alpha[:, k]) < 1e-6):
                     break
 
             alpha = alpha[:, :k + 1]
@@ -77,7 +102,7 @@ class StochasticLQ(object):
 
         return Qs, Ts
 
-    def _lanczos_step_batch(self, U, rhs_vectors, matmul_closure, Q):
+    def _lanczos_step_batch(self, U, rhs_vectors, matmul_closure, Q, prev_beta):
         num_vectors, dim, num_iters = Q.size()
         norm_vs = torch.norm(rhs_vectors, 2, dim=0)
         orig_U = U
@@ -91,15 +116,19 @@ class StochasticLQ(object):
         R = matmul_closure(U) - norm_vs * orig_U
 
         a = U.mul(R).sum(0)
-
         rhs_vectors = (R - a * U)
-
+        if rhs_vectors.size()[1] == 1:
+            norm_r = torch.norm(rhs_vectors, 2)
+            if Q.size()[2] > 1 and norm_r < math.sqrt(a[0] ** 2 + prev_beta[0] ** 2):
+                s = Q[0].t().matmul(rhs_vectors)
+                rhs_vectors = rhs_vectors - Q[0].matmul(s)
+                a = a + s[-1]
+                norm_vs = norm_vs + s[-2]
         # Numerical Problems
         rhs_vectors += 1e-10
         a = torch.max(a, a.new(*a.size()).fill_(1) * 1e-20)
         norm_vs = torch.max(norm_vs, norm_vs.new(*norm_vs.size()).fill_(1) * 1e-20)
         U += 1e-10
-
         return U, rhs_vectors, a, norm_vs
 
     def _batch_mv(self, M, V):

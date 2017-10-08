@@ -106,4 +106,5 @@ class LinearCG(object):
 
         if output_dims == 1:
             result = result.squeeze(1)
+        print r_sq_news.sqrt()[0]
         return result

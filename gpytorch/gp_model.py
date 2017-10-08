@@ -6,7 +6,7 @@ from torch.autograd import Variable
 from .random_variables import RandomVariable, GaussianRandomVariable
 from .lazy import LazyVariable, MulLazyVariable
 from .likelihoods import GaussianLikelihood
-
+import pdb
 
 class GPModel(gpytorch.Module):
     def __init__(self, likelihood):
@@ -160,15 +160,17 @@ class GPModel(gpytorch.Module):
                 train_test_covar = full_covar[:n_train, n_train:]
                 test_train_covar = full_covar[n_train:, :n_train]
                 test_test_covar = full_covar[n_train:, n_train:]
-
+#                pdb.set_trace()
                 # Calculate posterior components
                 if not self.has_computed_alpha[0]:
-                    alpha_strategy = gpytorch.posterior_strategy(train_train_covar)
-                    alpha = alpha_strategy.exact_posterior_alpha(train_mean, train_y)
-                    self.alpha.copy_(alpha.data)
+                    alpha = gpytorch.inv_matmul(train_train_covar, train_y - train_mean)
+#                    alpha_strategy = gpytorch.posterior_strategy(train_train_covar)
+#                    alpha = alpha_strategy.exact_posterior_alpha(train_mean, train_y)
+                    self.alpha = alpha.data
                     self.has_computed_alpha.fill_(1)
                 else:
                     alpha = Variable(self.alpha)
+                return 0
                 mean_strategy = gpytorch.posterior_strategy(test_train_covar)
                 test_mean = mean_strategy.exact_posterior_mean(test_mean, alpha)
                 if isinstance(full_covar, MulLazyVariable):

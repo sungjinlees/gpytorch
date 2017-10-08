@@ -14,3 +14,4 @@ __all__ = [
 fastest = True
 num_trace_samples = 10
 max_cg_iterations = 15
+max_slq_iterations = 15
