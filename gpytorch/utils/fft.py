@@ -9,12 +9,11 @@ def fft1(input):
     input = input.view(-1, input.size(-1))
     n, d = input.size()
 
-    output = input.new().resize_(n, (d // 2) + 1, 2)
+    output = input.new().cpu().resize_(n, (d // 2) + 1, 2)
+    libfft.fft1_r2c(input.cpu().float(), output)
+
     if input.is_cuda:
-        libfft.fft1_r2c_cuda(input, output)
-    else:
-        output = output.float()
-        libfft.fft1_r2c(input.float(), output)
+        output = output.cuda()    
 
     if len(orig_size) > 1:
         output_size = list(orig_size[:-1]) + [(d // 2) + 1, 2]
@@ -35,11 +34,9 @@ def ifft1(input, size=None):
         d = size[-1]
     input = input.view(-1, *input.size()[-2:])
 
-    output = input.new().resize_(input.size(0), d)
+    output = input.new().cpu().resize_(input.size(0), d)
+    libfft.fft1_c2r(input.cpu(), output)
     if input.is_cuda:
-        libfft.fft1_c2r_cuda(input, output)
-    else:
-        output = output.float()
-        libfft.fft1_c2r(input.float(), output)
+        output = output.cuda()
     output.div_(d)
     return output.view(size).type(orig_type)
