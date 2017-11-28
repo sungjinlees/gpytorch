@@ -68,10 +68,7 @@ class GPModel(gpytorch.Module):
         # Approximate inference
         else:
             samples = output._variational_strategy.variational_samples(output)
-            n_samples = samples.size(1)
-            log_likelihood = self.likelihood.log_probability(samples.view(-1),
-                                                             target.unsqueeze(1).repeat(1, n_samples).view(-1))
-            log_likelihood = log_likelihood.div(n_samples).div(n_batch)
+            log_likelihood = self.likelihood.log_probability(samples, target).div(n_batch)
             kl_divergence = output._variational_strategy.mvn_kl_divergence().div(n_data)
 
             res = log_likelihood - kl_divergence

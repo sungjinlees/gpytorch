@@ -47,4 +47,6 @@ class BernoulliLikelihood(Likelihood):
         \Phi(y_{i}f_{i}) is computed by averaging over a set of s samples of
         f_{i} drawn from p(f|x).
         """
-        return gpytorch.log_normal_cdf(f.mul(y)).sum(0)
+        n_samples = f.size(-1)
+        res = gpytorch.log_normal_cdf(f.mul(y.unsqueeze(-1))).sum()
+        return res.div(n_samples)
