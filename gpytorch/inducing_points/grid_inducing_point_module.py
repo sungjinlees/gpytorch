@@ -179,10 +179,9 @@ class GridInducingPointModule(InducingPointModule):
             output = GaussianRandomVariable(test_mean, test_covar)
 
             # Add variational strategy
-            if self.training:
-                output._variational_strategy = GridInducingPointStrategy(variational_mean,
-                                                                         chol_variational_covar,
-                                                                         induc_output)
+            output._variational_strategy = GridInducingPointStrategy(variational_mean,
+                                                                     chol_variational_covar,
+                                                                     induc_output)
 
         if not isinstance(output, GaussianRandomVariable):
             raise RuntimeError('Output should be a GaussianRandomVariable')

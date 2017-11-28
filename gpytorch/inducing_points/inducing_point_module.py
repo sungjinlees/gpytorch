@@ -64,9 +64,6 @@ class InducingPointModule(gpytorch.Module):
                 variational_mean.data.copy_(mean_init)
                 chol_variational_covar.data.copy_(chol_covar_init)
                 self.variational_params_initialized.fill_(1)
-            # Add variational strategy
-            output._variational_strategy = InducingPointStrategy(variational_mean,
-                                                                 chol_variational_covar, output)
 
         # Posterior mode
         else:
@@ -105,6 +102,10 @@ class InducingPointModule(gpytorch.Module):
             test_covar = test_test_covar + MatmulLazyVariable(left_factor, right_factor)
 
             output = GaussianRandomVariable(test_mean, test_covar)
+
+        # Add variational strategy
+        output._variational_strategy = InducingPointStrategy(variational_mean,
+                                                             chol_variational_covar, output)
 
         if not isinstance(output, GaussianRandomVariable):
             raise RuntimeError('Output should be a GaussianRandomVariable')
