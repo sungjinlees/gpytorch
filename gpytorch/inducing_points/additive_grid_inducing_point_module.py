@@ -3,16 +3,17 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .grid_inducing_point_module import GridInducingPointModule
-from ..lazy import NonLazyVariable, SumInterpolatedLazyVariable
+from ..lazy import NonLazyVariable, InterpolatedLazyVariable, SumInterpolatedLazyVariable
 from ..random_variables import GaussianRandomVariable
 from ..variational import GridInducingPointStrategy
 from ..utils import left_interp
 
 
 class AdditiveGridInducingPointModule(GridInducingPointModule):
-    def __init__(self, grid_size, grid_bounds, n_components, mixing_params=False):
+    def __init__(self, grid_size, grid_bounds, n_components, mixing_params=False, sum_output=True):
         super(AdditiveGridInducingPointModule, self).__init__(grid_size, grid_bounds)
         self.n_components = n_components
+        self.sum_output = sum_output
 
         # Resize variational parameters to have one size per component
         self.alpha.resize_(*([n_components] + list(self.alpha.size())))
@@ -75,11 +76,17 @@ class AdditiveGridInducingPointModule(GridInducingPointModule):
             interp_values = Variable(interp_values)
             if hasattr(self, 'mixing_params'):
                 interp_values = interp_values.mul(self.mixing_params.unsqueeze(1).unsqueeze(2))
-            mean = left_interp(interp_indices, interp_values, induc_output.mean()).sum(0)
+            mean = left_interp(interp_indices, interp_values, induc_output.mean())
+            if self.sum_output:
+                mean = mean.sum(0)
 
             # Compute test covar
             base_lv = induc_output.covar()
-            covar = SumInterpolatedLazyVariable(base_lv, interp_indices, interp_values, interp_indices, interp_values)
+            if self.sum_output:
+                covar = SumInterpolatedLazyVariable(base_lv, interp_indices, interp_values,
+                                                    interp_indices, interp_values)
+            else:
+                covar = InterpolatedLazyVariable(base_lv, interp_indices, interp_values, interp_indices, interp_values)
 
             return GaussianRandomVariable(mean, covar)
 
@@ -121,15 +128,21 @@ class AdditiveGridInducingPointModule(GridInducingPointModule):
             interp_values = Variable(interp_values)
             if hasattr(self, 'mixing_params'):
                 interp_values = interp_values.mul(self.mixing_params.unsqueeze(1).unsqueeze(2))
-            test_mean = left_interp(interp_indices, interp_values, alpha.unsqueeze(-1)).sum(0).squeeze(-1)
+            test_mean = left_interp(interp_indices, interp_values, alpha.unsqueeze(-1)).squeeze(-1)
+            if self.sum_output:
+                test_mean = test_mean.sum(0)
 
             # Compute test covar
             if self.training:
                 base_lv = induc_output.covar()
             else:
                 base_lv = NonLazyVariable(self.variational_covar)
-            test_covar = SumInterpolatedLazyVariable(base_lv, interp_indices, interp_values,
-                                                     interp_indices, interp_values)
+            if self.sum_output:
+                test_covar = SumInterpolatedLazyVariable(base_lv, interp_indices, interp_values,
+                                                         interp_indices, interp_values)
+            else:
+                test_covar = InterpolatedLazyVariable(base_lv, interp_indices, interp_values,
+                                                      interp_indices, interp_values)
 
             output = GaussianRandomVariable(test_mean, test_covar)
 
