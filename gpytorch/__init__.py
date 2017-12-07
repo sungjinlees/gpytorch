@@ -2,7 +2,8 @@ from torch.autograd import Variable
 from .lazy import LazyVariable, ToeplitzLazyVariable
 from .module import Module
 from .gp_model import GPModel
-from .inducing_points import AdditiveGridInducingPointModule, InducingPointModule, GridInducingPointModule
+from .inducing_points import AdditiveInducingPointModule, AdditiveGridInducingPointModule, \
+        InducingPointModule, GridInducingPointModule
 from .functions import AddDiag, DSMM, NormalCDF, LogNormalCDF
 from .utils import function_factory
 from .posterior import DefaultPosteriorStrategy
