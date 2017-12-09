@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .grid_inducing_point_module import InducingPointModule
-from ..lazy import NonLazyVariable, InterpolatedLazyVariable, SumInterpolatedLazyVariable
+from ..lazy import LazyVariable, NonLazyVariable, MatmulLazyVariable
 from ..random_variables import GaussianRandomVariable
 from ..variational import InducingPointStrategy
 from ..utils import left_interp
@@ -52,12 +52,11 @@ class AdditiveInducingPointModule(InducingPointModule):
             if not torch.equal(inputs.data, inducing_points):
                 raise RuntimeError('At the moment, we assume that the inducing_points are the'
                                    ' training inputs.')
-            output = gpytorch.Module.__call__(self, Variable(inducing_points))
-            print(inducing_points.size(), output.covar().size())
+            inducing_output = gpytorch.Module.__call__(self, Variable(inducing_points))
+            output = inducing_output
 
             if not self.variational_params_initialized[0]:
                 mean_init = output.mean().data
-                print(mean_init.size())
                 mean_init_size = list(mean_init.size())
                 mean_init_size[0] = self.n_components
                 mean_init = mean_init.expand(*mean_init_size)
@@ -71,7 +70,7 @@ class AdditiveInducingPointModule(InducingPointModule):
                 self.variational_params_initialized.fill_(1)
 
         else:
-            n_induc = len(inducing_points)
+            n_induc = inducing_points.size(1)
             full_inputs = torch.cat([Variable(inducing_points), inputs], 1)
             full_output = super(InducingPointModule, self).__call__(full_inputs)
             full_mean, full_covar = full_output.representation()
@@ -83,8 +82,8 @@ class AdditiveInducingPointModule(InducingPointModule):
             test_induc_covar = full_covar[:, n_induc:, :n_induc]
             test_test_covar = full_covar[:, n_induc:, n_induc:]
 
-            alpha = variational_mean.sub(induc_output.mean())
-            test_mean = torch.add(test_mean, test_induc_covar.matmul(alpha))
+            alpha = gpytorch.inv_matmul(induc_induc_covar, variational_mean - induc_mean).unsqueeze(-1)
+            test_mean = torch.add(test_mean, test_induc_covar.matmul(alpha).squeeze(-1))
             if self.sum_output:
                 test_mean = test_mean.sum(0)
 
@@ -93,19 +92,15 @@ class AdditiveInducingPointModule(InducingPointModule):
                 induc_test_covar = induc_test_covar.evaluate()
             inv_product = gpytorch.inv_matmul(induc_induc_covar, induc_test_covar)
             factor = chol_variational_covar.matmul(inv_product)
-            right_factor = factor - inv_product
-            left_factor = (factor - induc_test_covar).transpose(-1, -2)
+            test_covar = MatmulLazyVariable(factor.transpose(-1, -2), factor)
 
-            if not isinstance(test_test_covar, LazyVariable):
-                test_test_covar = NonLazyVariable(test_test_covar)
-            test_covar = test_test_covar + MatmulLazyVariable(left_factor, right_factor)
-
+            inducing_output = GaussianRandomVariable(induc_mean, induc_induc_covar)
             output = GaussianRandomVariable(test_mean, test_covar)
 
         # Add variational strategy
         output._variational_strategy = InducingPointStrategy(variational_mean,
                                                              chol_variational_covar,
-                                                             output)
+                                                             inducing_output)
 
         if not isinstance(output, GaussianRandomVariable):
             raise RuntimeError('Output should be a GaussianRandomVariable')
