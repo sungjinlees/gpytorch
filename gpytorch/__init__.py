@@ -48,7 +48,9 @@ def add_jitter(mat):
     if isinstance(mat, LazyVariable):
         return mat.add_jitter()
     elif isinstance(mat, Variable):
-        diag = Variable(mat.data.new(len(mat)).fill_(1e-3).diag())
+        diag = Variable(mat.data.new(mat.size(-2)).fill_(1e-3).diag())
+        if mat.ndimension() == 3:
+            diag = diag.unsqueeze(0)
         return mat + diag
     else:
         diag = mat.new(len(mat)).fill_(1e-3).diag()
@@ -130,6 +132,7 @@ __all__ = [
     Module,
     GPModel,
     AdditiveGridInducingPointModule,
+    AdditiveInducingPointModule,
     GridInducingPointModule,
     InducingPointModule,
     add_diag,

@@ -8,6 +8,11 @@ class MatmulLazyVariable(LazyVariable):
         self.lhs = lhs
         self.rhs = rhs
 
+    def _matmul_closure_factory(self, lhs, rhs):
+        def closure(tensor):
+            return torch.matmul(lhs, torch.matmul(rhs, tensor))
+        return closure
+
     def diag(self):
         return (self.lhs * self.rhs.t()).sum(1)
 
