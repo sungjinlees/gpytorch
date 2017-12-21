@@ -22,24 +22,26 @@ class MatmulLazyVariable(LazyVariable):
 
         return closure
 
-    def is_batch(self):
-        return self.lhs.ndimension() > 2
+    def _size(self):
+        if self.lhs.ndimension() > 2:
+            return torch.Size((self.lhs.size()[0], self.lhs.size()[1], self.lhs.size()[1]))
+        else:
+            return torch.Size((self.lhs.size()[0], self.lhs.size()[0]))
+
+    def _transpose_nonbatch(self):
+        return MatmulLazyVariable(self.rhs.transpose(-1, -2), self.lhs.transpose(-1, -2))
+
+    def _batch_get_indices(self, batch_indices, left_indices, right_indices):
+        left_vals = self.lhs[batch_indices, left_indices, :]
+        right_vals = self.rhs[batch_indices, :, right_indices]
+        return (left_vals * right_vals).sum(-1)
+
+    def _get_indices(self, left_indices, right_indices):
+        res = self.lhs.index_select(-2, left_indices) * self.rhs.index_select(-1, right_indices).transpose(-1, -2)
+        return res.sum(-1)
 
     def diag(self):
         return (self.lhs * self.rhs.transpose(-1, -2)).sum(-1)
 
     def evaluate(self):
         return torch.matmul(self.lhs, self.rhs)
-
-    def size(self):
-        if self.is_batch():
-            return torch.Size((self.lhs.size()[0], self.lhs.size()[1], self.lhs.size()[1]))
-        else:
-            return torch.Size((self.lhs.size()[0], self.lhs.size()[0]))
-
-    def __getitem__(self, indices):
-        if self.ndimension() == 2:
-            index1, index2 = indices
-            return MatmulLazyVariable(self.lhs[index1, :], self.rhs[:, index2])
-        else:
-            raise NotImplementedError('Batch __getitem__ not implemented yet')
