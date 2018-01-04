@@ -89,6 +89,7 @@ class GridInducingPointModule(InducingPointModule):
                                                                                               inputs_max))
         interp_indices, interp_values = Interpolation().interpolate(self.grid[0], inputs.data.squeeze())
 
+        # Put everything in batch mode by default
         interp_indices = Variable(interp_indices)
         interp_values = Variable(interp_values)
         return interp_indices, interp_values
