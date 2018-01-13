@@ -22,6 +22,6 @@ class RBFKernel(Kernel):
         x2_squared = x2_squared.view(1, m).expand(n, m)
         res.sub_(x1_squared).sub_(x2_squared)  # res = -(x - z)^2
 
-        res = res / (self.log_lengthscale.exp() + self.eps)  # res = -(x - z)^2 / lengthscale
+        res = res / ((2 * self.log_lengthscale).exp() + self.eps)  # res = -(x - z)^2 / lengthscale
         res.exp_()
         return res
