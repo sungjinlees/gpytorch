@@ -1,9 +1,7 @@
+from torch.autograd import Variable
 from .lazy_variable import LazyVariable
 from .non_lazy_variable import NonLazyVariable
-import torch
-from torch.autograd import Variable
-from ..utils.trace import trace_components
-from gpytorch.utils import StochasticLQ
+from ..utils import prod
 
 
 class MulLazyVariable(LazyVariable):
@@ -11,363 +9,187 @@ class MulLazyVariable(LazyVariable):
         '''
         Args:
             - lazy_vars (A list of LazyVariable) - A list of LazyVariable to multiplicate with.
-            - matmul_mode (String) - deterministic(default), stochastic or approximate
-            - max_iter (int) - the maximum iteration in lanczos decomposition in when matmul_mode=approximate
-            - num_samples (int) - the samples number when matmul_mode=stochastic
         '''
         lazy_vars = list(lazy_vars)
+        if len(lazy_vars) == 1:
+            raise RuntimeError('MulLazyVariable should have more than one lazy variables')
+
         for i, lazy_var in enumerate(lazy_vars):
             if not isinstance(lazy_var, LazyVariable):
                 if isinstance(lazy_var, Variable):
                     lazy_vars[i] = NonLazyVariable(lazy_var)
                 else:
                     raise RuntimeError('All arguments of a MulLazyVariable should be lazy variables or vairables')
-        super(MulLazyVariable, self).__init__(*lazy_vars, **kwargs)
 
-        self.lazy_vars = lazy_vars
+        # Sort lazy variables by root decomposition size (rank)
+        lazy_vars = sorted(lazy_vars, key=lambda lv: lv.root_decomposition_size())
 
-        if 'matmul_mode' in kwargs:
-            self.matmul_mode = kwargs['matmul_mode']
-        else:
-            self.matmul_mode = 'deterministic'
-
-        if 'added_diag' in kwargs:
-            self.added_diag = kwargs['added_diag']
-        else:
-            self.added_diag = None
-
-        if 'max_iter' in kwargs:
-            self.max_iter = kwargs['max_iter']
-        else:
-            self.max_iter = 15
-
-        if self.matmul_mode == 'approximate':
-            if len(lazy_vars) > 1:
-                half_d = int(len(lazy_vars) / 2)
-                self.left_var = MulLazyVariable(*lazy_vars[:half_d], matmul_mode='approximate',
-                                                max_iter=self.max_iter)
-                self.right_var = MulLazyVariable(*lazy_vars[half_d:], matmul_mode='approximate',
-                                                 max_iter=self.max_iter)
-        if self.matmul_mode == 'deterministic':
-            self.num_samples = lazy_vars[0].size()[0]
-        else:
-            if 'num_samples' in kwargs:
-                self.num_samples = kwargs['num_samples']
+        # Recursively construct lazy variables
+        # Make sure the recursive components get a mix of low_rank and high_rank variables
+        if len(lazy_vars) > 2:
+            interleaved_lazy_vars = lazy_vars[0::2] + lazy_vars[1::2]
+            if len(interleaved_lazy_vars) > 3:
+                left_lazy_var = MulLazyVariable(*interleaved_lazy_vars[:len(interleaved_lazy_vars) // 2])
             else:
-                self.num_samples = 200
+                # Make sure we're not constructing a MulLazyVariable of length 1
+                left_lazy_var = interleaved_lazy_vars[0]
+            right_lazy_var = MulLazyVariable(*interleaved_lazy_vars[len(interleaved_lazy_vars) // 2:])
+        else:
+            left_lazy_var = lazy_vars[0]
+            right_lazy_var = lazy_vars[1]
+
+        super(MulLazyVariable, self).__init__(left_lazy_var, right_lazy_var)
+        self.left_lazy_var = left_lazy_var
+        self.right_lazy_var = right_lazy_var
+        self._orig_lazy_vars = lazy_vars
+
+    def _left_root(self):
+        if not hasattr(self, '_left_root_memo'):
+            self._left_root_memo = self.left_lazy_var.root_decomposition().data
+        return self._left_root_memo
+
+    def _right_root(self):
+        if not hasattr(self, '_right_root_memo'):
+            self._right_root_memo = self.right_lazy_var.root_decomposition().data
+        return self._right_root_memo
+
+    def _left_evaluated(self):
+        if not hasattr(self, '_left_evaluated_memo'):
+            self._left_evaluated_memo = self.left_lazy_var.evaluate().data
+        return self._left_evaluated_memo
+
+    def _right_evaluated(self):
+        if not hasattr(self, '_right_evaluated_memo'):
+            self._right_evaluated_memo = self.right_lazy_var.evaluate().data
+        return self._right_evaluated_memo
 
     def _matmul_closure_factory(self, *args):
-        n1, n2 = self.size()
-        if n1 != n2:
-            temp_samples = self.num_samples
-            self.num_samples = self.lazy_vars[0].size()[0]
-            result = self._stoch_deter_matmul_closure_factory(*args)
-            self.num_samples = temp_samples
-            return result
-        elif self.matmul_mode == 'approximate':
-            return self._approx_matmul_closure_factory(*args)
-        elif self.matmul_mode == 'stochastic' or self.matmul_mode == 'deterministic':
-            return self._stoch_deter_matmul_closure_factory(*args)
-        else:
-            raise RuntimeError('matmul_mode should be approximate, stochastic or deterministic')
+        len_left_repr = len(self.left_lazy_var.representation())
+        right_matmul_closure = self.right_lazy_var._matmul_closure_factory(*args[len_left_repr:])
 
-    def _stoch_deter_matmul_closure_factory(self, *args):
-        sub_closures = []
-        i = 0
-        for lazy_var in self.lazy_vars:
-            len_repr = len(lazy_var.representation())
-            sub_closure = lazy_var._matmul_closure_factory(*args[i:i + len_repr])
-            sub_closures.append(sub_closure)
-            i = i + len_repr
-        if len(args) > i:
-            added_diag = args[-1]
-            args = args[:-1]
-        else:
-            added_diag = None
+        def closure(rhs_mat):
+            is_vector = False
+            if rhs_mat.ndimension() == 1:
+                rhs_mat = rhs_mat.unsqueeze(1)
+                is_vector = True
+            batch_size = max(rhs_mat.size(0), self.size(0)) if rhs_mat.ndimension() == 3 else None
 
-        if len(self.lazy_vars) == 1:
-            def closure(rhs_mat):
-                if_vector = False
-                if rhs_mat.ndimension() == 1:
-                    rhs_mat = rhs_mat.unsqueeze(1)
-                    if_vector = True
-                res_mul = self.lazy_vars[0]._matmul_closure_factory(*args)(rhs_mat)
-                if added_diag is not None:
-                    res_diag = rhs_mat.mul(added_diag.expand_as(rhs_mat.t()).t())
-                    res = res_mul + res_diag
-                else:
-                    res = res_mul
-                res = res.squeeze(1) if if_vector else res
-                return res
-        else:
-            def closure(rhs_mat):
-                if_vector = False
-                if rhs_mat.ndimension() == 1:
-                    rhs_mat = rhs_mat.unsqueeze(1)
-                    if_vector = True
-                n, m = rhs_mat.size()
-                dim = len(self.lazy_vars)
-
-                if self.num_samples < n:
-                    sample_matrix = torch.sign(rhs_mat.new(dim - 1, self.num_samples, n, m).normal_())
-                    num_samples = self.num_samples
-                else:
-                    sample_matrix = torch.diag(rhs_mat.new(n).fill_(1)).expand(dim - 1, m, n, n).transpose(1, 3)
-                    sample_matrix = sample_matrix.contiguous()
-                    num_samples = n
-
-                sample_matrix_1 = torch.cat((sample_matrix, rhs_mat.expand(1, num_samples, n, m)), dim=0)
-                sample_matrix_2 = torch.cat((rhs_mat.new(1, num_samples, n, m).fill_(1), sample_matrix), dim=0)
-
-                right_factor = (sample_matrix_1 * sample_matrix_2).transpose(1, 2).contiguous()
-                right_factor = right_factor.view(dim, n, num_samples * m)
-
-                res_mul = torch.ones(n, num_samples * m)
-                for i in range(dim):
-                    res_mul *= sub_closures[i](right_factor[i])
-
-                res_mul = res_mul.view(n, num_samples, m).sum(1)
-
-                if self.num_samples < n:
-                    res_mul.div_(num_samples)
-
-                if added_diag is not None:
-                    res_diag = rhs_mat.mul(added_diag.expand_as(rhs_mat.t()).t())
-                    res = res_mul + res_diag
-                else:
-                    res = res_mul
-                res = res.squeeze(1) if if_vector else res
-                return res
+            # Here we're doing a root decomposition
+            if self.left_lazy_var.root_decomposition_size() < self.left_lazy_var.size(-1):
+                left_root = self._left_root()
+                rank = left_root.size(-1)
+                n = self.size(-1)
+                m = rhs_mat.size(-1)
+                # Now implement the formula (A . B) v = diag(A D_v B)
+                left_res = (rhs_mat.unsqueeze(-2) * left_root.unsqueeze(-1))
+                left_res = left_res.view(n, rank * m) if batch_size is None else left_res.view(batch_size, n, rank * m)
+                left_res = right_matmul_closure(left_res)
+                left_res = left_res.view(n, rank, m) if batch_size is None else left_res.view(batch_size, n, rank, m)
+                res = left_res.mul_(left_root.unsqueeze(-1)).sum(-2)
+            # This is the case where we're not doing a root decomposition, because the matrix is too small
+            else:
+                left_evaluated = self._left_evaluated()
+                right_evaluated = self._right_evaluated()
+                res = (left_evaluated * right_evaluated).matmul(rhs_mat)
+            res = res.squeeze(-1) if is_vector else res
+            return res
 
         return closure
-
-    def _approx_matmul_closure_factory(self, *args):
-        args_length = 0
-        half_d = int(len(self.lazy_vars) / 2)
-        for i in range(half_d):
-            args_length += len(self.lazy_vars[i].representation())
-        half_args_length = args_length
-        for i in range(half_d, len(self.lazy_vars)):
-            args_length += len(self.lazy_vars[i].representation())
-        if len(args) > args_length:
-            added_diag = args[-1]
-            args = args[:-1]
-        else:
-            added_diag = None
-        if len(self.lazy_vars) == 1:
-            def closure(rhs_mat):
-                if_vector = False
-                if rhs_mat.ndimension() == 1:
-                    rhs_mat = rhs_mat.unsqueeze(1)
-                    if_vector = True
-                res_mul = self.lazy_vars[0]._matmul_closure_factory(*args)(rhs_mat)
-                if added_diag is not None:
-                    res_diag = rhs_mat.mul(added_diag.expand_as(rhs_mat.t()).t())
-                    res = res_mul + res_diag
-                else:
-                    res = res_mul
-                res = res.squeeze(1) if if_vector else res
-                return res
-        else:
-            def closure(rhs_mat):
-                if_vector = False
-                if rhs_mat.ndimension() == 1:
-                    rhs_mat = rhs_mat.unsqueeze(1)
-                    if_vector = True
-                Q_1, T_1 = self.left_var._lanczos_quadrature_form(*args[:half_args_length])
-                Q_2, T_2 = self.right_var._lanczos_quadrature_form(*args[half_args_length:])
-
-                n, k_1 = Q_1.size()
-                _, m = rhs_mat.size()
-                _, k_2 = Q_2.size()
-
-                if not hasattr(self, '_Q_2_T_2'):
-                    self._Q_2_T_2 = Q_2.matmul(T_2)
-                Q_2_T_2 = self._Q_2_T_2
-                rhs_mat_expand = rhs_mat.expand(k_2, n, m).transpose(0, 2).contiguous()
-                rhs_mat_Q_2_T_2 = rhs_mat_expand.mul(Q_2_T_2)
-                if not hasattr(self, '_T_1_Q_1_t'):
-                    self._T_1_Q_1_t = T_1.matmul(Q_1.t())
-                T_1_Q_1_t = self._T_1_Q_1_t
-
-                m_res = T_1_Q_1_t.matmul(rhs_mat_Q_2_T_2)
-                res_mul = Q_1.matmul(m_res).mul(Q_2).sum(2).transpose(0, 1).contiguous()
-
-                if added_diag is not None:
-                    res_diag = rhs_mat.mul(added_diag.expand_as(rhs_mat.t()).t())
-                    res = res_mul + res_diag
-                else:
-                    res = res_mul
-                res = res.squeeze(1) if if_vector else res
-                return res
-        return closure
-
-    def _lanczos_quadrature_form(self, *args):
-        if not hasattr(self, '_lanczos_quadrature'):
-            n = self.size()[0]
-            z = args[0].new(n, 1).normal_()
-            z = z / torch.norm(z, 2, 0)
-
-            def tensor_matmul_closure(rhs):
-                return self._matmul_closure_factory(*args)(rhs)
-
-            Q, T = StochasticLQ(cls=type(z), max_iter=self.max_iter).lanczos_batch(tensor_matmul_closure, z)
-            Q = Q[0]
-            T = T[0]
-            self._lanczos_quadrature = Q, T
-        return self._lanczos_quadrature
 
     def _derivative_quadratic_form_factory(self, *args):
-        args_index = []
-        args_index.append(0)
-        i = 0
-        for lazy_var in self.lazy_vars:
-            len_repr = len(lazy_var.representation())
-            i = i + len_repr
-            args_index.append(i)
-        if len(args) > args_index[-1]:
-            added_diag = args[-1]
-            args = args[:-1]
-        else:
-            added_diag = None
+        len_left_repr = len(self.left_lazy_var.representation())
+        left_deriv_closure = self.left_lazy_var._derivative_quadratic_form_factory(*args[:len_left_repr])
+        right_deriv_closure = self.right_lazy_var._derivative_quadratic_form_factory(*args[len_left_repr:])
 
         def closure(left_vecs, right_vecs):
             if left_vecs.ndimension() == 1:
                 left_vecs = left_vecs.unsqueeze(0)
                 right_vecs = right_vecs.unsqueeze(0)
-            vecs_num, n = left_vecs.size()
+            left_vecs_t = left_vecs.transpose(-1, -2)
+            right_vecs_t = right_vecs.transpose(-1, -2)
+            batch_size = self.size(0) if self.ndimension() == 3 else None
 
-            res = []
-            for i in range(len(self.lazy_vars)):
-                i1 = args_index[i]
-                i2 = args_index[i + 1]
-                first_deriv_closre = self.lazy_vars[i]._derivative_quadratic_form_factory(*args[i1:i2])
-                second_lazy_vars = list(self.lazy_vars[:i]) + list(self.lazy_vars[i + 1:])
-                second_args = list(args[:i1]) + list(args[i2:])
+            n = left_vecs.size(-1)
+            vecs_num = left_vecs.size(-2)
 
-                second_mul_closure = MulLazyVariable(*second_lazy_vars,
-                                                     matmul_mode=self.matmul_mode,
-                                                     max_iter=self.max_iter,
-                                                     num_samples=self.num_samples)._matmul_closure_factory(*second_args)
+            if self.right_lazy_var.root_decomposition_size() < self.right_lazy_var.size(-1):
+                right_root = self._right_root()
+                right_rank = right_root.size(-1)
 
-                def left_matmul_closure(samples_matrix):
-                    _, s = samples_matrix.size()
-                    left_vecs_expand = left_vecs.expand(s, vecs_num, n).transpose(0, 1).contiguous()
-                    return left_vecs_expand.mul(samples_matrix.t()).view(s * vecs_num, n)
+                left_factor = left_vecs_t.unsqueeze(-2) * right_root.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * right_root.unsqueeze(-1)
+            else:
+                right_evaluated = self._right_evaluated()
+                right_rank = n
+                eye = right_evaluated.new(n).fill_(1).diag()
+                left_factor = left_vecs_t.unsqueeze(-2) * right_evaluated.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * eye.unsqueeze(-1)
 
-                def right_matmul_closure(samples_matrix):
-                    _, s = samples_matrix.size()
-                    right_vecs_expand = right_vecs.expand(s, vecs_num, n).transpose(0, 1).contiguous()
-                    second_var_sample_matrix = second_mul_closure(samples_matrix)
-                    return right_vecs_expand.mul(second_var_sample_matrix.t()).view(s * vecs_num, n)
+            if batch_size is None:
+                left_factor = left_factor.view(n, vecs_num * right_rank)
+                right_factor = right_factor.view(n, vecs_num * right_rank)
+            else:
+                left_factor = left_factor.view(batch_size, n, vecs_num * right_rank)
+                right_factor = right_factor.view(batch_size, n, vecs_num * right_rank)
+            left_deriv_args = left_deriv_closure(left_factor.transpose(-1, -2), right_factor.transpose(-1, -2))
 
-                left_matrix, right_matrix = trace_components(left_matmul_closure, right_matmul_closure,
-                                                             size=n, tensor_cls=type(left_vecs))
-                deriv_args_i = list(first_deriv_closre(left_matrix, right_matrix))
-                res = res + deriv_args_i
+            if self.left_lazy_var.root_decomposition_size() < self.left_lazy_var.size(-1):
+                left_root = self._left_root()
+                left_rank = left_root.size(-1)
+                left_factor = left_vecs_t.unsqueeze(-2) * left_root.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * left_root.unsqueeze(-1)
+            else:
+                left_evaluated = self._left_evaluated()
+                left_rank = n
+                eye = left_evaluated.new(n).fill_(1).diag()
+                left_factor = left_vecs_t.unsqueeze(-2) * left_evaluated.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * eye.unsqueeze(-1)
 
-            if added_diag is not None:
-                diag_grad = added_diag.new(len(added_diag)).fill_(0)
-                diag_grad[0] = (left_vecs * right_vecs).sum()
-                res = res + [diag_grad]
+            if batch_size is None:
+                left_factor = left_factor.view(n, vecs_num * left_rank)
+                right_factor = right_factor.view(n, vecs_num * left_rank)
+            else:
+                left_factor = left_factor.view(batch_size, n, vecs_num * left_rank)
+                right_factor = right_factor.view(batch_size, n, vecs_num * left_rank)
+            right_deriv_args = right_deriv_closure(left_factor.transpose(-1, -2), right_factor.transpose(-1, -2))
 
-            return tuple(res)
+            return tuple(left_deriv_args + right_deriv_args)
         return closure
 
-    def add_diag(self, diag):
-        if self.added_diag is None:
-            return MulLazyVariable(*self.lazy_vars,
-                                   matmul_mode=self.matmul_mode,
-                                   max_iter=self.max_iter,
-                                   num_samples=self.num_samples,
-                                   added_diag=diag.expand(self.size()[0]))
-        else:
-            return MulLazyVariable(*self.lazy_vars,
-                                   matmul_mode=self.matmul_mode,
-                                   max_iter=self.max_iter,
-                                   num_samples=self.num_samples,
-                                   added_diag=self.added_diag + diag)
-
-    def add_jitter(self):
-        new_lazy_vars = list(lazy_var.add_jitter() for lazy_var in self.lazy_vars)
-        return MulLazyVariable(*new_lazy_vars,
-                               matmul_mode=self.matmul_mode,
-                               max_iter=self.max_iter,
-                               num_samples=self.num_samples,
-                               added_diag=self.added_diag)
-
     def diag(self):
-        res = Variable(torch.ones(self.size()[0]))
-        for lazy_var in self.lazy_vars:
-            res = res * lazy_var.diag()
-
-        if self.added_diag is not None:
-            res = res + self.added_diag
+        res = prod([lazy_var.diag() for lazy_var in self._orig_lazy_vars])
         return res
 
     def evaluate(self):
-        res = None
-        for lazy_var in self.lazy_vars:
-            if res is None:
-                res = lazy_var.evaluate()
-            else:
-                res = res * lazy_var.evaluate()
-
-        if self.added_diag is not None:
-            res = res + self.added_diag.diag()
+        res = prod([lazy_var.evaluate() for lazy_var in self._orig_lazy_vars])
         return res
 
     def mul(self, other):
-        if isinstance(other, int) or isinstance(other, float):
-            lazy_vars = list(self.lazy_vars[:-1])
-            lazy_vars.append(self.lazy_vars[-1] * other)
-            added_diag = self.added_diag * other
-            return MulLazyVariable(*lazy_vars, added_diag=added_diag, matmul_mode=self.matmul_mode)
+        if isinstance(other, int) or isinstance(other, float) or (isinstance(other, Variable) and other.numel() == 1):
+            lazy_vars = list(self._orig_lazy_vars[:-1])
+            lazy_vars.append(self._orig_lazy_vars[-1] * other)
+            return MulLazyVariable(*lazy_vars)
         elif isinstance(other, MulLazyVariable):
-            if self.added_diag is not None:
-                res = list((self, other))
-                return MulLazyVariable(*res)
-            return MulLazyVariable(*(list(self.lazy_vars) + list(other.lazy_vars)), matmul_mode=self.matmul_mode)
+            res = list(self._orig_lazy_vars) + list(other._orig_lazy_vars)
+            return MulLazyVariable(*res)
         elif isinstance(other, LazyVariable):
-            if self.added_diag is not None:
-                res = list((self, other))
-                return MulLazyVariable(*res, matmul_mode=self.matmul_mode)
-            return MulLazyVariable(*(list(self.lazy_vars) + [other]), matmul_mode=self.matmul_mode)
+            return MulLazyVariable(*(list(self._orig_lazy_vars) + [other]))
         else:
             raise RuntimeError('other must be a LazyVariable, int or float.')
 
-    def representation(self):
-        res = list(var for lazy_var in self.lazy_vars for var in lazy_var.representation())
-        if self.added_diag is not None:
-            res = res + [self.added_diag]
-        return tuple(res)
+    def _size(self):
+        return self._orig_lazy_vars[0].size()
 
-    def size(self):
-        return self.lazy_vars[0].size()
+    def _batch_get_indices(self, batch_indices, left_indices, right_indices):
+        res = prod([lazy_var._batch_get_indices(batch_indices, left_indices, right_indices)
+                    for lazy_var in self._orig_lazy_vars])
+        return res
+
+    def _get_indices(self, left_indices, right_indices):
+        res = prod([lazy_var._get_indices(left_indices, right_indices)
+                    for lazy_var in self._orig_lazy_vars])
+        return res
 
     def _transpose_nonbatch(self):
-        lazy_vars_t = list(lazy_var.t() for lazy_var in self.lazy_vars)
-        return MulLazyVariable(*lazy_vars_t,
-                               matmul_mode=self.matmul_mode,
-                               max_iter=self.max_iter,
-                               num_samples=self.num_samples,
-                               added_diag=self.added_diag)
-
-    def __getitem__(self, i):
-        sliced_lazy_vars = [lazy_var.__getitem__(i) for lazy_var in self.lazy_vars]
-        if self.added_diag is not None:
-            if isinstance(i, tuple):
-                first_index = i[0]
-                if not isinstance(first_index, slice):
-                    first_index = slice(first_index, first_index + 1, None)
-                second_index = i[1]
-                if not isinstance(second_index, slice):
-                    second_index = slice(second_index, second_index + 1, None)
-                if first_index == second_index:
-                    return MulLazyVariable(*sliced_lazy_vars,
-                                           added_diag=self.added_diag[first_index],
-                                           matmul_mode=self.matmul_mode)
-            raise RuntimeError('Slicing in to a hadamard product of matrces that has an additional \
-                                diagonal component to make it non-square is probably not intended.\
-                                It is ambiguous which diagonal elements to choose')
-        return MulLazyVariable(*sliced_lazy_vars, matmul_mode=self.matmul_mode)
+        # mul_lazy_variable only works with symmetric matrices
+        return self
