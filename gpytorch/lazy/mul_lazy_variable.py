@@ -153,7 +153,7 @@ class MulLazyVariable(LazyVariable):
                 right_factor = right_factor.view(batch_size, n, vecs_num * left_rank)
             right_deriv_args = right_deriv_closure(left_factor.transpose(-1, -2), right_factor.transpose(-1, -2))
 
-            return tuple(left_deriv_args + right_deriv_args)
+            return tuple(list(left_deriv_args) + list(right_deriv_args))
         return closure
 
     def diag(self):
