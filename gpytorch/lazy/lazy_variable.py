@@ -381,7 +381,8 @@ class LazyVariable(object):
             # Take care of extra roots (odd roots), if they exist
             if n_batch % 2:
                 last_root = roots[:, -1].contiguous().view(-1, roots.size(2), roots.size(3))
-                last_root = last_root.squeeze(0)
+                if mul_batch_size is None:
+                    last_root = last_root.squeeze(0)
                 extras.append(RootLazyVariable(last_root))
 
             # Divide and conqour
@@ -392,8 +393,9 @@ class LazyVariable(object):
             part2 = part2.contiguous().view(-1, roots.size(2), roots.size(3))
 
             if n_batch // 2 == 1:
-                part1 = part1.squeeze(0)
-                part2 = part2.squeeze(0)
+                if mul_batch_size is None:
+                    part1 = part1.squeeze(0)
+                    part2 = part2.squeeze(0)
                 res = MulLazyVariable(*([RootLazyVariable(part1), RootLazyVariable(part2)] + extras))
                 break
             else:
