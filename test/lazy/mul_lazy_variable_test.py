@@ -257,12 +257,10 @@ def test_diag():
     mat1 = make_random_mat(20, rank=4)
     mat2 = make_random_mat(20, rank=4)
     mat3 = make_random_mat(20, rank=4)
-    const = Variable(torch.ones(1), requires_grad=True)
 
     mat1_copy = Variable(mat1.data, requires_grad=True)
     mat2_copy = Variable(mat2.data, requires_grad=True)
     mat3_copy = Variable(mat3.data, requires_grad=True)
-    const_copy = Variable(const.data, requires_grad=True)
 
     # Forward
     res = MulLazyVariable(RootLazyVariable(mat1), RootLazyVariable(mat2), RootLazyVariable(mat3)).diag()
@@ -278,12 +276,10 @@ def test_batch_diag():
     mat1 = make_random_mat(20, rank=4, batch_size=5)
     mat2 = make_random_mat(20, rank=4, batch_size=5)
     mat3 = make_random_mat(20, rank=4, batch_size=5)
-    const = Variable(torch.ones(1), requires_grad=True)
 
     mat1_copy = Variable(mat1.data, requires_grad=True)
     mat2_copy = Variable(mat2.data, requires_grad=True)
     mat3_copy = Variable(mat3.data, requires_grad=True)
-    const_copy = Variable(const.data, requires_grad=True)
 
     # Forward
     res = MulLazyVariable(RootLazyVariable(mat1), RootLazyVariable(mat2), RootLazyVariable(mat3)).diag()
@@ -300,12 +296,10 @@ def test_getitem():
     mat1 = make_random_mat(20, rank=4)
     mat2 = make_random_mat(20, rank=4)
     mat3 = make_random_mat(20, rank=4)
-    const = Variable(torch.ones(1), requires_grad=True)
 
     mat1_copy = Variable(mat1.data, requires_grad=True)
     mat2_copy = Variable(mat2.data, requires_grad=True)
     mat3_copy = Variable(mat3.data, requires_grad=True)
-    const_copy = Variable(const.data, requires_grad=True)
 
     # Forward
     res = MulLazyVariable(RootLazyVariable(mat1), RootLazyVariable(mat2), RootLazyVariable(mat3))
@@ -324,12 +318,10 @@ def test_batch_getitem():
     mat1 = make_random_mat(20, rank=4, batch_size=5)
     mat2 = make_random_mat(20, rank=4, batch_size=5)
     mat3 = make_random_mat(20, rank=4, batch_size=5)
-    const = Variable(torch.ones(1), requires_grad=True)
 
     mat1_copy = Variable(mat1.data, requires_grad=True)
     mat2_copy = Variable(mat2.data, requires_grad=True)
     mat3_copy = Variable(mat3.data, requires_grad=True)
-    const_copy = Variable(const.data, requires_grad=True)
 
     # Forward
     res = MulLazyVariable(RootLazyVariable(mat1), RootLazyVariable(mat2), RootLazyVariable(mat3))
@@ -341,7 +333,7 @@ def test_batch_getitem():
 
     assert torch.max(((res[0].evaluate().data - actual[0].data) / actual[0].data).abs()) < 0.01
     assert torch.max(((res[0:2, 5, 3:5].data - actual[0:2, 5, 3:5].data) / actual[0:2, 5, 3:5].data).abs()) < 0.01
-    assert torch.max(((res[:, 3:5, 2:].evaluate().data - actual[:, 3:5, 2:].data) / \
-            actual[:, 3:5, 2:].data).abs()) < 0.01
-    assert torch.max(((res[:, 2:, 3:5].evaluate().data - actual[:, 2:, 3:5].data) / \
-            actual[:, 2:, 3:5].data).abs()) < 0.01
+    assert torch.max(((res[:, 3:5, 2:].evaluate().data - actual[:, 3:5, 2:].data) /
+                      actual[:, 3:5, 2:].data).abs()) < 0.01
+    assert torch.max(((res[:, 2:, 3:5].evaluate().data - actual[:, 2:, 3:5].data) /
+                      actual[:, 2:, 3:5].data).abs()) < 0.01
