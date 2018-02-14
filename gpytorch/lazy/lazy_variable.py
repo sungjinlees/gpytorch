@@ -1,3 +1,4 @@
+import math
 import torch
 from torch.autograd import Variable
 from ..utils import function_factory
@@ -374,16 +375,16 @@ class LazyVariable(object):
         n_batch = roots.size(0) if mul_batch_size is None else mul_batch_size
         true_batch_size = roots.size(0) // mul_batch_size if mul_batch_size is not None else 1
 
-        extras = []
         while True:
             roots = roots.view(true_batch_size, n_batch, roots.size(1), roots.size(2))
 
             # Take care of extra roots (odd roots), if they exist
             if n_batch % 2:
-                last_root = roots[:, -1].contiguous().view(-1, roots.size(2), roots.size(3))
-                if mul_batch_size is None:
-                    last_root = last_root.squeeze(0)
-                extras.append(RootLazyVariable(last_root))
+                extra_root = Variable(roots.data.new(roots.size(0), 1, roots.size(2), roots.size(3)))
+                extra_root.data.normal_().mul_(1e-6 / math.sqrt(roots.size(3)))
+                extra_root.data.add_(1. / math.sqrt(roots.size(3)))
+                roots = torch.cat([roots, extra_root], 1)
+                n_batch += 1
 
             # Divide and conqour
             # Assumes that there's an even number of roots
@@ -396,7 +397,7 @@ class LazyVariable(object):
                 if mul_batch_size is None:
                     part1 = part1.squeeze(0)
                     part2 = part2.squeeze(0)
-                res = MulLazyVariable(*([RootLazyVariable(part1), RootLazyVariable(part2)] + extras))
+                res = MulLazyVariable(RootLazyVariable(part1), RootLazyVariable(part2))
                 break
             else:
                 res = MulLazyVariable(RootLazyVariable(part1), RootLazyVariable(part2))
