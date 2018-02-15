@@ -5,7 +5,6 @@ from .lincg import LinearCG
 from .stochastic_lq import StochasticLQ
 from .trace import trace_components
 from .lanczos import lanczos_tridiag
-import pdb
 
 
 def _default_matmul_closure_factory(mat):
@@ -183,9 +182,8 @@ def trace_logdet_quad_form_factory(matmul_closure_factory=_default_matmul_closur
                 grad_mu_diff = mat_inv_y.mul(2 * grad_output_value).squeeze(-2)
 
             if self.needs_input_grad[1]:
-                # Compute gradient with respect to the Cholesky factor L
-                grad_cholesky_factor = 2 * LinearCG().solve(matmul_closure_factory(*covar2_args),
-                                                            chol_covar1.transpose(-1, -2)).transpose(-1, -2)
+                # Compute gradient with respect to the Cholesky factor R
+                grad_cholesky_factor = 2 * covar2_inv_chol_covar1.transpose(-1, -2)
                 grad_cholesky_factor = grad_cholesky_factor.contiguous()
                 grad_cholesky_factor.mul_(grad_output_value)
 
