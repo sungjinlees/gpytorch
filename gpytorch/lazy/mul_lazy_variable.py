@@ -62,6 +62,15 @@ class MulLazyVariable(LazyVariable):
                 left_lazy_var = lazy_vars[0]
                 right_lazy_var = lazy_vars[1]
 
+
+            # Choose which we're doing: root decomposition or exact
+            if left_lazy_var.root_decomposition_size() < left_lazy_var.size(-1):
+                left_lazy_var = RootLazyVariable(left_lazy_var.root_decomposition())
+                right_lazy_var = RootLazyVariable(right_lazy_var.root_decomposition())
+            else:
+                left_lazy_var = NonLazyVariable(left_lazy_var.evaluate())
+                right_lazy_var = NonLazyVariable(right_lazy_var.evaluate())
+
             self._mul_args_memo = [
                 left_lazy_var,
                 right_lazy_var,
@@ -74,29 +83,8 @@ class MulLazyVariable(LazyVariable):
         # This is a no-op. We do something different here
         pass
 
-    def _left_root(self):
-        if not hasattr(self, '_left_root_memo'):
-            self._left_root_memo = self.left_lazy_var.root_decomposition().data
-        return self._left_root_memo
-
-    def _right_root(self):
-        if not hasattr(self, '_right_root_memo'):
-            self._right_root_memo = self.right_lazy_var.root_decomposition().data
-        return self._right_root_memo
-
-    def _left_evaluated(self):
-        if not hasattr(self, '_left_evaluated_memo'):
-            self._left_evaluated_memo = self.left_lazy_var.evaluate().data
-        return self._left_evaluated_memo
-
-    def _right_evaluated(self):
-        if not hasattr(self, '_right_evaluated_memo'):
-            self._right_evaluated_memo = self.right_lazy_var.evaluate().data
-        return self._right_evaluated_memo
-
-    def _matmul_closure_factory(self, *args):
-        len_left_repr = len(self.left_lazy_var.representation())
-        right_matmul_closure = self.right_lazy_var._matmul_closure_factory(*args[len_left_repr:])
+    def _matmul_closure_factory(self, left_repr, right_repr):
+        right_matmul_closure = self.right_lazy_var._matmul_closure_factory(right_repr)
 
         def closure(rhs_mat):
             is_vector = False
@@ -105,32 +93,28 @@ class MulLazyVariable(LazyVariable):
                 is_vector = True
             batch_size = max(rhs_mat.size(0), self.size(0)) if rhs_mat.ndimension() == 3 else None
 
-            # Here we're doing a root decomposition
-            if self.left_lazy_var.root_decomposition_size() < self.left_lazy_var.size(-1):
-                left_root = self._left_root()
-                rank = left_root.size(-1)
+            # Here we have a root decomposition
+            if isinstance(self.left_lazy_var, RootLazyVariable):
+                rank = left_repr.size(-1)
                 n = self.size(-1)
                 m = rhs_mat.size(-1)
                 # Now implement the formula (A . B) v = diag(A D_v B)
-                left_res = (rhs_mat.unsqueeze(-2) * left_root.unsqueeze(-1))
+                left_res = (rhs_mat.unsqueeze(-2) * left_repr.unsqueeze(-1))
                 left_res = left_res.view(n, rank * m) if batch_size is None else left_res.view(batch_size, n, rank * m)
                 left_res = right_matmul_closure(left_res)
                 left_res = left_res.view(n, rank, m) if batch_size is None else left_res.view(batch_size, n, rank, m)
-                res = left_res.mul_(left_root.unsqueeze(-1)).sum(-2)
+                res = left_res.mul_(left_repr.unsqueeze(-1)).sum(-2)
             # This is the case where we're not doing a root decomposition, because the matrix is too small
             else:
-                left_evaluated = self._left_evaluated()
-                right_evaluated = self._right_evaluated()
-                res = (left_evaluated * right_evaluated).matmul(rhs_mat)
+                res = (left_repr * right_repr).matmul(rhs_mat)
             res = res.squeeze(-1) if is_vector else res
             return res
 
         return closure
 
-    def _derivative_quadratic_form_factory(self, *args):
-        len_left_repr = len(self.left_lazy_var.representation())
-        left_deriv_closure = self.left_lazy_var._derivative_quadratic_form_factory(*args[:len_left_repr])
-        right_deriv_closure = self.right_lazy_var._derivative_quadratic_form_factory(*args[len_left_repr:])
+    def _derivative_quadratic_form_factory(self, left_repr, right_repr):
+        left_deriv_closure = self.left_lazy_var._derivative_quadratic_form_factory(left_repr)
+        right_deriv_closure = self.right_lazy_var._derivative_quadratic_form_factory(right_repr)
 
         def closure(left_vecs, right_vecs):
             if left_vecs.ndimension() == 1:
@@ -143,17 +127,14 @@ class MulLazyVariable(LazyVariable):
             n = left_vecs.size(-1)
             vecs_num = left_vecs.size(-2)
 
-            if self.right_lazy_var.root_decomposition_size() < self.right_lazy_var.size(-1):
-                right_root = self._right_root()
-                right_rank = right_root.size(-1)
-
-                left_factor = left_vecs_t.unsqueeze(-2) * right_root.unsqueeze(-1)
-                right_factor = right_vecs_t.unsqueeze(-2) * right_root.unsqueeze(-1)
+            if isinstance(self.right_lazy_var, RootLazyVariable):
+                right_rank = right_repr.size(-1)
+                left_factor = left_vecs_t.unsqueeze(-2) * right_repr.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * right_repr.unsqueeze(-1)
             else:
-                right_evaluated = self._right_evaluated()
                 right_rank = n
-                eye = right_evaluated.new(n).fill_(1).diag()
-                left_factor = left_vecs_t.unsqueeze(-2) * right_evaluated.unsqueeze(-1)
+                eye = right_repr.new(n).fill_(1).diag()
+                left_factor = left_vecs_t.unsqueeze(-2) * right_repr.unsqueeze(-1)
                 right_factor = right_vecs_t.unsqueeze(-2) * eye.unsqueeze(-1)
 
             if batch_size is None:
@@ -164,16 +145,14 @@ class MulLazyVariable(LazyVariable):
                 right_factor = right_factor.view(batch_size, n, vecs_num * right_rank)
             left_deriv_args = left_deriv_closure(left_factor.transpose(-1, -2), right_factor.transpose(-1, -2))
 
-            if self.left_lazy_var.root_decomposition_size() < self.left_lazy_var.size(-1):
-                left_root = self._left_root()
-                left_rank = left_root.size(-1)
-                left_factor = left_vecs_t.unsqueeze(-2) * left_root.unsqueeze(-1)
-                right_factor = right_vecs_t.unsqueeze(-2) * left_root.unsqueeze(-1)
+            if isinstance(self.left_lazy_var, RootLazyVariable):
+                left_rank = left_repr.size(-1)
+                left_factor = left_vecs_t.unsqueeze(-2) * left_repr.unsqueeze(-1)
+                right_factor = right_vecs_t.unsqueeze(-2) * left_repr.unsqueeze(-1)
             else:
-                left_evaluated = self._left_evaluated()
                 left_rank = n
-                eye = left_evaluated.new(n).fill_(1).diag()
-                left_factor = left_vecs_t.unsqueeze(-2) * left_evaluated.unsqueeze(-1)
+                eye = left_repr.new(n).fill_(1).diag()
+                left_factor = left_vecs_t.unsqueeze(-2) * left_repr.unsqueeze(-1)
                 right_factor = right_vecs_t.unsqueeze(-2) * eye.unsqueeze(-1)
 
             if batch_size is None:
