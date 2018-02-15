@@ -1,6 +1,7 @@
 from torch.autograd import Variable
 from .lazy_variable import LazyVariable
 from .non_lazy_variable import NonLazyVariable
+from .root_lazy_variable import RootLazyVariable
 from ..utils import prod
 
 
@@ -21,27 +22,57 @@ class MulLazyVariable(LazyVariable):
                 else:
                     raise RuntimeError('All arguments of a MulLazyVariable should be lazy variables or vairables')
 
-        # Sort lazy variables by root decomposition size (rank)
-        lazy_vars = sorted(lazy_vars, key=lambda lv: lv.root_decomposition_size())
+        super(MulLazyVariable, self).__init__(*lazy_vars)
+        self.lazy_vars = lazy_vars
 
-        # Recursively construct lazy variables
-        # Make sure the recursive components get a mix of low_rank and high_rank variables
-        if len(lazy_vars) > 2:
-            interleaved_lazy_vars = lazy_vars[0::2] + lazy_vars[1::2]
-            if len(interleaved_lazy_vars) > 3:
-                left_lazy_var = MulLazyVariable(*interleaved_lazy_vars[:len(interleaved_lazy_vars) // 2])
+    @property
+    def left_lazy_var(self):
+        return self._mul_args_memo[0]
+
+    @property
+    def right_lazy_var(self):
+        return self._mul_args_memo[1]
+
+    @property
+    def _args(self):
+        if not hasattr(self, '_mul_args_memo'):
+            # Sort lazy variables by root decomposition size (rank)
+            lazy_vars = sorted(self.lazy_vars, key=lambda lv: lv.root_decomposition_size())
+
+            # Recursively construct lazy variables
+            # Make sure the recursive components get a mix of low_rank and high_rank variables
+            if len(lazy_vars) > 2:
+                interleaved_lazy_vars = lazy_vars[0::2] + lazy_vars[1::2]
+                if len(interleaved_lazy_vars) > 3:
+                    left_lazy_var = MulLazyVariable(*interleaved_lazy_vars[:len(interleaved_lazy_vars) // 2])
+                    if left_lazy_var.root_decomposition_size() < left_lazy_var.size(-1):
+                        left_lazy_var = RootLazyVariable(left_lazy_var.root_decomposition())
+                    else:
+                        left_lazy_var = NonLazyVariable(left_lazy_var.evaluate())
+                else:
+                    # Make sure we're not constructing a MulLazyVariable of length 1
+                    left_lazy_var = interleaved_lazy_vars[0]
+
+                right_lazy_var = MulLazyVariable(*interleaved_lazy_vars[len(interleaved_lazy_vars) // 2:])
+                if right_lazy_var.root_decomposition_size() < right_lazy_var.size(-1):
+                    right_lazy_var = RootLazyVariable(right_lazy_var.root_decomposition())
+                else:
+                    right_lazy_var = NonLazyVariable(right_lazy_var.evaluate())
             else:
-                # Make sure we're not constructing a MulLazyVariable of length 1
-                left_lazy_var = interleaved_lazy_vars[0]
-            right_lazy_var = MulLazyVariable(*interleaved_lazy_vars[len(interleaved_lazy_vars) // 2:])
-        else:
-            left_lazy_var = lazy_vars[0]
-            right_lazy_var = lazy_vars[1]
+                left_lazy_var = lazy_vars[0]
+                right_lazy_var = lazy_vars[1]
 
-        super(MulLazyVariable, self).__init__(left_lazy_var, right_lazy_var)
-        self.left_lazy_var = left_lazy_var
-        self.right_lazy_var = right_lazy_var
-        self._orig_lazy_vars = lazy_vars
+            self._mul_args_memo = [
+                left_lazy_var,
+                right_lazy_var,
+            ]
+
+        return self._mul_args_memo
+
+    @_args.setter
+    def _args(self, args):
+        # This is a no-op. We do something different here
+        pass
 
     def _left_root(self):
         if not hasattr(self, '_left_root_memo'):
@@ -157,37 +188,37 @@ class MulLazyVariable(LazyVariable):
         return closure
 
     def diag(self):
-        res = prod([lazy_var.diag() for lazy_var in self._orig_lazy_vars])
+        res = prod([lazy_var.diag() for lazy_var in self.lazy_vars])
         return res
 
     def evaluate(self):
-        res = prod([lazy_var.evaluate() for lazy_var in self._orig_lazy_vars])
+        res = prod([lazy_var.evaluate() for lazy_var in self.lazy_vars])
         return res
 
     def mul(self, other):
         if isinstance(other, int) or isinstance(other, float) or (isinstance(other, Variable) and other.numel() == 1):
-            lazy_vars = list(self._orig_lazy_vars[:-1])
-            lazy_vars.append(self._orig_lazy_vars[-1] * other)
+            lazy_vars = list(self.lazy_vars[:-1])
+            lazy_vars.append(self.lazy_vars[-1] * other)
             return MulLazyVariable(*lazy_vars)
         elif isinstance(other, MulLazyVariable):
-            res = list(self._orig_lazy_vars) + list(other._orig_lazy_vars)
+            res = list(self.lazy_vars) + list(other.lazy_vars)
             return MulLazyVariable(*res)
         elif isinstance(other, LazyVariable):
-            return MulLazyVariable(*(list(self._orig_lazy_vars) + [other]))
+            return MulLazyVariable(*(list(self.lazy_vars) + [other]))
         else:
             raise RuntimeError('other must be a LazyVariable, int or float.')
 
     def _size(self):
-        return self._orig_lazy_vars[0].size()
+        return self.lazy_vars[0].size()
 
     def _batch_get_indices(self, batch_indices, left_indices, right_indices):
         res = prod([lazy_var._batch_get_indices(batch_indices, left_indices, right_indices)
-                    for lazy_var in self._orig_lazy_vars])
+                    for lazy_var in self.lazy_vars])
         return res
 
     def _get_indices(self, left_indices, right_indices):
         res = prod([lazy_var._get_indices(left_indices, right_indices)
-                    for lazy_var in self._orig_lazy_vars])
+                    for lazy_var in self.lazy_vars])
         return res
 
     def _transpose_nonbatch(self):
