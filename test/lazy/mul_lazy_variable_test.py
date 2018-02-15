@@ -340,7 +340,7 @@ def test_batch_getitem():
 
 
 def test_batch_mode_matmul_mat_with_five_matrices():
-    mats = make_random_mat(6, rank=4, batch_size=5)
+    mats = make_random_mat(6, rank=4, batch_size=6)
     vec = Variable(torch.randn(6, 7), requires_grad=True)
 
     mats_copy = Variable(mats.data, requires_grad=True)
@@ -354,6 +354,7 @@ def test_batch_mode_matmul_mat_with_five_matrices():
         mats_copy[2].matmul(mats_copy[2].transpose(-1, -2)),
         mats_copy[3].matmul(mats_copy[3].transpose(-1, -2)),
         mats_copy[4].matmul(mats_copy[4].transpose(-1, -2)),
+        mats_copy[5].matmul(mats_copy[5].transpose(-1, -2)),
     ]).matmul(vec_copy)
     assert torch.max(((res.data - actual.data) / actual.data).abs()) < 0.01
 
