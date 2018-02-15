@@ -142,7 +142,7 @@ def trace_logdet_quad_form_factory(matmul_closure_factory=_default_matmul_closur
 
             # Tr(K2^{-1}K1)
             covar2_inv_chol_covar1  = LinearCG().solve(covar2_matmul_closure, chol_covar1.transpose(-1, -2))
-            trace = (covar2_inv_chol_covar1 * chol_covar1).sum(-2).sum(-1)
+            trace = (covar2_inv_chol_covar1 * chol_covar1.transpose(-1, -2)).sum(-2).sum(-1)
 
             # Inverse quad form
             mat_inv_y = LinearCG().solve(covar2_matmul_closure, mu_diff.unsqueeze(-1)).squeeze(-1)
