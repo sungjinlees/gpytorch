@@ -5,6 +5,7 @@ from .lincg import LinearCG
 from .stochastic_lq import StochasticLQ
 from .trace import trace_components
 from .lanczos import lanczos_tridiag
+import pdb
 
 
 def _default_matmul_closure_factory(mat):
@@ -140,17 +141,8 @@ def trace_logdet_quad_form_factory(matmul_closure_factory=_default_matmul_closur
                 log_det_covar2, = slq.evaluate(covar2_matmul_closure, mu_diff.size(-1), [lambda x: x.log()])
 
             # Tr(K2^{-1}K1)
-            def matmul_closure(sample_matrix):
-                if chol_covar1.ndimension() == 3:
-                    sample_matrix = sample_matrix.unsqueeze(0)
-                    sample_matrix = sample_matrix.expand(chol_covar1.size(0), sample_matrix.size(1),
-                                                         sample_matrix.size(2))
-                rhs_vectors = chol_covar1.transpose(-1, -2).contiguous().matmul(chol_covar1.matmul(sample_matrix))
-                return LinearCG().solve(covar2_matmul_closure, rhs_vectors)
-
-            sample_matrix, mat_inv_vectors = trace_components(None, matmul_closure, size=mu_diff.size(-1),
-                                                              tensor_cls=type(chol_covar1))
-            trace = (sample_matrix * mat_inv_vectors).sum(-2).sum(-1)
+            covar2_inv_chol_covar1  = LinearCG().solve(covar2_matmul_closure, chol_covar1.transpose(-1, -2))
+            trace = (covar2_inv_chol_covar1 * chol_covar1).sum(-2).sum(-1)
 
             # Inverse quad form
             mat_inv_y = LinearCG().solve(covar2_matmul_closure, mu_diff.unsqueeze(-1)).squeeze(-1)
@@ -162,6 +154,7 @@ def trace_logdet_quad_form_factory(matmul_closure_factory=_default_matmul_closur
 
             self.save_for_backward(*([mu_diff] + [chol_covar1] + list(covar2_args)))
             self.covar2_matmul_closure = covar2_matmul_closure
+            self.covar2_inv_chol_covar1 = covar2_inv_chol_covar1
             self.mat_inv_y = mat_inv_y
 
             return res
@@ -173,6 +166,7 @@ def trace_logdet_quad_form_factory(matmul_closure_factory=_default_matmul_closur
 
             args = self.saved_tensors
 
+            covar2_inv_chol_covar1 = self.covar2_inv_chol_covar1 
             mu_diff = args[0]
             chol_covar1 = args[1]
             covar2_args = args[2:]
